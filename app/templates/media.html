@@ -19,15 +19,26 @@
 
       <section id="result" class="panel hidden" aria-live="polite"></section>
       <section id="preparation-result" class="panel hidden" aria-live="polite"></section>
+      <section class="panel">
+        <h2>Validated Local Preparation</h2>
+        <p class="muted">Select a server-owned preparation that still passes the locked validator.</p>
+        <select id="rve-preparation-select" aria-label="Select a validated local preparation"></select>
+        <button id="create-existing-rve-job-button" type="button">Create RVE Job</button>
+      </section>
+      <section id="rve-result" class="panel hidden" aria-live="polite"></section>
     </main>
 
     <script>
       const candidateSelect = document.getElementById('candidate-select');
       const resultBox = document.getElementById('result');
       const preparationResultBox = document.getElementById('preparation-result');
+      const rveResultBox = document.getElementById('rve-result');
+      const rvePreparationSelect = document.getElementById('rve-preparation-select');
       const analyzeButton = document.getElementById('analyze-button');
       let currentAnalysis = null;
       let currentPlan = null;
+      let currentRveJob = null;
+      let rvePollTimer = null;
 
       function escapeHtml(value) {
         return String(value ?? '—')
@@ -217,12 +228,111 @@
               <li>Local artifact: ${escapeHtml(payload.prepared_artifact || payload.partial_artifact)}</li>
             </ul>
             <p>${escapeHtml((validation.reasons || [payload.reason]).filter(Boolean).join(' '))}</p>
+            ${payload.status === 'completed' ? '<button id="create-rve-job-button" type="button">Create RVE Job</button>' : ''}
           `;
+          const createButton = document.getElementById('create-rve-job-button');
+          if (createButton) {
+            createButton.addEventListener('click', () => createRveJob());
+          }
         } catch (error) {
           preparationResultBox.innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
         }
       }
 
+      function renderRveJob(job) {
+          currentRveJob = job;
+          const profile = job.profile || {};
+          const active = ['running', 'cancel_requested'].includes(job.state);
+          const canStart = job.state === 'created';
+          const progress = job.progress_percent == null ? 'Not available' : `${job.progress_percent}%`;
+          rveResultBox.innerHTML = `
+            <h2>RVE Enhancement Job</h2>
+            <ul>
+              <li>Job ID: ${escapeHtml(job.job_id)}</li>
+              <li>Profile: ${escapeHtml(profile.name)}</li>
+              <li>Backend: ${escapeHtml(profile.backend)}</li>
+              <li>Model: ${escapeHtml(profile.model_family)}</li>
+              <li>Scale: ${escapeHtml(profile.scale)}x</li>
+              <li>Interpolation: ${profile.interpolation ? 'ON' : 'OFF'}</li>
+              <li>Decompression: ${profile.decompression ? 'ON' : 'OFF'}</li>
+              <li>Denoise: ${profile.denoise ? 'ON' : 'OFF'}</li>
+              <li>State: ${escapeHtml(job.state)}</li>
+              <li>Started: ${escapeHtml(job.started_at)}</li>
+              <li>Progress: ${escapeHtml(progress)}</li>
+              <li>Status: ${escapeHtml(job.progress_message)}</li>
+              <li>Validation: ${escapeHtml(job.output_validation_status)}</li>
+              <li>Local artifact: ${escapeHtml(job.local_artifact_identity)}</li>
+            </ul>
+            ${job.failure_reason ? `<p class="error">${escapeHtml(job.failure_reason)}</p>` : ''}
+            ${job.cancellation_reason ? `<p>${escapeHtml(job.cancellation_reason)}</p>` : ''}
+            ${canStart ? '<p><strong>Review the locked profile before explicitly starting enhancement.</strong></p><button id="start-rve-job-button" type="button">Start Enhancement</button>' : ''}
+            ${active && job.state === 'running' ? '<button id="cancel-rve-job-button" type="button">Cancel Enhancement</button>' : ''}
+          `;
+          rveResultBox.classList.remove('hidden');
+          document.getElementById('start-rve-job-button')?.addEventListener('click', startRveJob);
+          document.getElementById('cancel-rve-job-button')?.addEventListener('click', cancelRveJob);
+          if (active && !rvePollTimer) {
+            rvePollTimer = window.setInterval(refreshRveJob, 2000);
+          } else if (!active && rvePollTimer) {
+            window.clearInterval(rvePollTimer);
+            rvePollTimer = null;
+          }
+        }
+
+      async function rveRequest(url, options = {}) {
+          const response = await fetch(url, options);
+          const payload = await response.json();
+          if (!response.ok) {
+            throw new Error(payload.detail || 'RVE job request failed.');
+          }
+          return payload;
+        }
+
+      async function createRveJob(preparationId = currentPlan?.preparation_id) {
+          if (!preparationId) {
+            rveResultBox.innerHTML = '<p class="error">A completed server-owned preparation is required.</p>';
+            rveResultBox.classList.remove('hidden');
+            return;
+          }
+          try {
+            const job = await rveRequest('/api/rve/jobs', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ preparation_id: preparationId }),
+            });
+            renderRveJob(job);
+          } catch (error) {
+            rveResultBox.innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
+            rveResultBox.classList.remove('hidden');
+          }
+        }
+
+      async function startRveJob() {
+          try {
+            renderRveJob(await rveRequest(`/api/rve/jobs/${currentRveJob.job_id}/start`, { method: 'POST' }));
+          } catch (error) {
+            rveResultBox.innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
+          }
+        }
+
+      async function refreshRveJob() {
+          if (!currentRveJob?.job_id) return;
+          try {
+            renderRveJob(await rveRequest(`/api/rve/jobs/${currentRveJob.job_id}`));
+          } catch (error) {
+            if (rvePollTimer) window.clearInterval(rvePollTimer);
+            rvePollTimer = null;
+            rveResultBox.innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
+          }
+        }
+
+      async function cancelRveJob() {
+          try {
+            renderRveJob(await rveRequest(`/api/rve/jobs/${currentRveJob.job_id}/cancel`, { method: 'POST' }));
+          } catch (error) {
+            rveResultBox.innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
+          }
+        }
       async function loadCandidates() {
         const response = await fetch('/api/media/discover');
         const payload = await response.json();
@@ -230,6 +340,20 @@
           throw new Error('Discovery response was not valid.');
         }
         renderCandidateOptions(payload.candidates);
+      }
+
+      async function loadValidatedPreparations() {
+        const payload = await rveRequest('/api/rve/preparations');
+        rvePreparationSelect.innerHTML = '';
+        (payload.preparations || [])
+          .filter((preparation) => preparation.available_for_rve)
+          .forEach((preparation) => {
+            const option = document.createElement('option');
+            option.value = preparation.preparation_id;
+            const geometry = preparation.prepared_geometry || {};
+            option.textContent = `${preparation.source_relative_path || preparation.preparation_id} | ${geometry.width || '—'}x${geometry.height || '—'}`;
+            rvePreparationSelect.appendChild(option);
+          });
       }
 
       analyzeButton.addEventListener('click', async () => {
@@ -264,6 +388,13 @@
       loadCandidates().catch((error) => {
         resultBox.innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
         resultBox.classList.remove('hidden');
+      });
+      loadValidatedPreparations().catch((error) => {
+        rveResultBox.innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
+        rveResultBox.classList.remove('hidden');
+      });
+      document.getElementById('create-existing-rve-job-button').addEventListener('click', () => {
+        createRveJob(rvePreparationSelect.value);
       });
     </script>
   </body>
