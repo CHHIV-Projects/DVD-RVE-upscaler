@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DVD Media Analysis</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="container media-page">
+      <h1>DVD Media Analysis</h1>
+      <p class="muted">Read-only discovery and analysis for the approved DVD source root.</p>
+
+      <section class="panel">
+        <label for="candidate-select">Select source candidate</label>
+        <select id="candidate-select" aria-label="Select a DVD source candidate"></select>
+        <button id="analyze-button" type="button">Analyze</button>
+      </section>
+
+      <section id="result" class="panel hidden" aria-live="polite"></section>
+    </main>
+
+    <script>
+      const candidateSelect = document.getElementById('candidate-select');
+      const resultBox = document.getElementById('result');
+      const analyzeButton = document.getElementById('analyze-button');
+
+      function renderCandidateOptions(candidates) {
+        candidateSelect.innerHTML = '';
+        candidates.forEach((candidate) => {
+          const option = document.createElement('option');
+          option.value = candidate.relative_path;
+          option.textContent = candidate.relative_path;
+          candidateSelect.appendChild(option);
+        });
+      }
+
+      function renderSummary(data) {
+        const geometry = data.geometry || {};
+        const samples = Array.isArray(data.idet_samples) ? data.idet_samples : [];
+
+        const sampleMarkup = samples.map((sample) => {
+          const summary = [
+            `sample=${sample.sample_time}s`,
+            `progressive=${sample.progressive_ratio}`,
+            `tff=${sample.tff_ratio}`,
+            `bff=${sample.bff_ratio}`,
+            `repeated=${sample.repeated_field_ratio}`,
+            `status=${sample.status}`,
+          ].join(' | ');
+          return `<li>${summary}</li>`;
+        }).join('');
+
+        resultBox.innerHTML = `
+          <h2>Selected Source</h2>
+          <p>${data.relative_source || '—'}</p>
+
+          <h3>Media Summary</h3>
+          <ul>
+            <li>Duration: ${data.duration_seconds ? data.duration_seconds.toFixed(2) : '—'}s</li>
+            <li>Codec: ${data.video_stream?.codec || '—'}</li>
+            <li>Resolution: ${data.video_stream?.width || '—'}x${data.video_stream?.height || '—'}</li>
+            <li>SAR: ${data.video_stream?.sample_aspect_ratio || '—'}</li>
+            <li>DAR: ${data.video_stream?.display_aspect_ratio || '—'}</li>
+            <li>Frame Rate: ${data.video_stream?.avg_frame_rate || data.video_stream?.r_frame_rate || '—'}</li>
+            <li>Field Order: ${data.metadata_field_order || '—'}</li>
+            <li>Prepared Geometry: ${geometry.prepared_width || '—'}x${geometry.prepared_height || '—'}</li>
+          </ul>
+
+          <h3>Audio</h3>
+          <ul>${(data.audio_streams || []).map((stream) => `<li>${stream.codec || 'audio'} | channels=${stream.channels || '—'} | lang=${stream.language || '—'}</li>`).join('') || '<li>No audio streams reported.</li>'}</ul>
+
+          <h3>Subtitles</h3>
+          <ul>${(data.subtitle_streams || []).map((stream) => `<li>${stream.codec || 'subtitle'} | lang=${stream.language || '—'} | title=${stream.title || '—'}</li>`).join('') || '<li>No subtitle streams reported.</li>'}</ul>
+
+          <h3>Content Samples</h3>
+          <ul>${sampleMarkup || '<li>No idet evidence available.</li>'}</ul>
+
+          <h3>Classification</h3>
+          <ul>
+            <li>Content: ${data.content_classification || '—'}</li>
+            <li>Final: ${data.final_classification || '—'}</li>
+          </ul>
+          <p>${(data.classification_reasons || []).join(' ') || 'No additional reasons.'}</p>
+        `;
+        resultBox.classList.remove('hidden');
+      }
+
+      async function loadCandidates() {
+        const response = await fetch('/api/media/discover');
+        const payload = await response.json();
+        if (!Array.isArray(payload.candidates)) {
+          throw new Error('Discovery response was not valid.');
+        }
+        renderCandidateOptions(payload.candidates);
+      }
+
+      analyzeButton.addEventListener('click', async () => {
+        const relativePath = candidateSelect.value;
+        if (!relativePath) {
+          resultBox.innerHTML = '<p>No candidate selected.</p>';
+          resultBox.classList.remove('hidden');
+          return;
+        }
+
+        resultBox.innerHTML = '<p>Analyzing selected media…</p>';
+        resultBox.classList.remove('hidden');
+
+        try {
+          const response = await fetch('/api/media/analyze', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ relative_path: relativePath }),
+          });
+
+          const payload = await response.json();
+          if (!response.ok) {
+            throw new Error(payload.detail || 'Analysis failed.');
+          }
+          renderSummary(payload);
+        } catch (error) {
+          resultBox.innerHTML = `<p class="error">${error.message}</p>`;
+          resultBox.classList.remove('hidden');
+        }
+      });
+
+      loadCandidates().catch((error) => {
+        resultBox.innerHTML = `<p class="error">${error.message}</p>`;
+        resultBox.classList.remove('hidden');
+      });
+    </script>
+  </body>
+</html>
