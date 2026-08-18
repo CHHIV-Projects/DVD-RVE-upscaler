@@ -1,0 +1,59 @@
+body {
+  margin: 0;
+  font-family: Arial, Helvetica, sans-serif;
+  background: #f3f5f8;
+  color: #1d2433;
+}
+
+.shell {
+  max-width: 840px;
+  margin: 0 auto;
+  padding: 48px 24px 64px;
+}
+
+.hero {
+  background: #0f172a;
+  color: #f8fafc;
+  border-radius: 12px;
+  padding: 32px 28px;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
+}
+
+.eyebrow {
+  margin: 0 0 8px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  opacity: 0.8;
+}
+
+.hero h1 {
+  margin: 0;
+  font-size: 2.2rem;
+}
+
+.status {
+  margin-top: 14px;
+  color: #cbd5e1;
+}
+
+.panel {
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 24px 28px;
+  margin-top: 24px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+}
+
+.panel h2 {
+  margin-top: 0;
+}
+
+ol {
+  margin: 0;
+  padding-left: 1.4rem;
+}
+
+li + li {
+  margin-top: 8px;
+}
