@@ -57,3 +57,41 @@ ol {
 li + li {
   margin-top: 8px;
 }
+
+label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 700;
+}
+
+select,
+button {
+  font: inherit;
+  padding: 10px 12px;
+}
+
+select {
+  min-width: min(100%, 420px);
+  margin-right: 8px;
+}
+
+button {
+  border: 0;
+  border-radius: 6px;
+  background: #1d4ed8;
+  color: #fff;
+  cursor: pointer;
+}
+
+.hidden {
+  display: none;
+}
+
+.muted {
+  color: #64748b;
+}
+
+.error {
+  color: #b91c1c;
+  font-weight: 700;
+}

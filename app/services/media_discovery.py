@@ -62,15 +62,20 @@ def validate_candidate_relative_path(candidate_relative_path: str | None, root: 
         raise ValueError("Path traversal is not allowed.")
 
     base = Path(root or settings.dvd_source_root).resolve()
-    candidate = (base / normalized).resolve(strict=False)
+    unresolved_candidate = base / normalized
+    current = base
+    for part in Path(normalized).parts:
+        current = current / part
+        if current.is_symlink():
+            raise ValueError("Symlinks are not allowed for media analysis.")
+
+    candidate = unresolved_candidate.resolve(strict=False)
 
     try:
         candidate.relative_to(base)
     except ValueError as exc:
         raise ValueError("Selected candidate is outside the approved DVD source root.") from exc
 
-    if candidate.is_symlink():
-        raise ValueError("Symlinks are not allowed for media analysis.")
     if not candidate.exists():
         raise FileNotFoundError("Selected candidate was not found.")
     if not candidate.is_file():

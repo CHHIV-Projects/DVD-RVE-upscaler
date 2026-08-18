@@ -3,13 +3,13 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>DVD Media Analysis</title>
+    <title>DVD Media Analysis and Preparation</title>
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
     <main class="container media-page">
-      <h1>DVD Media Analysis</h1>
-      <p class="muted">Read-only discovery and analysis for the approved DVD source root.</p>
+      <h1>DVD Media Analysis and Preparation</h1>
+      <p class="muted">Analyze immutable DVD originals, review a controlled plan, and prepare only to local NVMe.</p>
 
       <section class="panel">
         <label for="candidate-select">Select source candidate</label>
@@ -18,12 +18,25 @@
       </section>
 
       <section id="result" class="panel hidden" aria-live="polite"></section>
+      <section id="preparation-result" class="panel hidden" aria-live="polite"></section>
     </main>
 
     <script>
       const candidateSelect = document.getElementById('candidate-select');
       const resultBox = document.getElementById('result');
+      const preparationResultBox = document.getElementById('preparation-result');
       const analyzeButton = document.getElementById('analyze-button');
+      let currentAnalysis = null;
+      let currentPlan = null;
+
+      function escapeHtml(value) {
+        return String(value ?? '—')
+          .replaceAll('&', '&amp;')
+          .replaceAll('<', '&lt;')
+          .replaceAll('>', '&gt;')
+          .replaceAll('"', '&quot;')
+          .replaceAll("'", '&#039;');
+      }
 
       function renderCandidateOptions(candidates) {
         candidateSelect.innerHTML = '';
@@ -36,8 +49,13 @@
       }
 
       function renderSummary(data) {
+        currentAnalysis = data;
+        currentPlan = null;
+        preparationResultBox.classList.add('hidden');
         const geometry = data.geometry || {};
         const samples = Array.isArray(data.idet_samples) ? data.idet_samples : [];
+        const eligibility = data.preparation_eligibility || {};
+        const proposal = data.preparation_proposal || {};
 
         const sampleMarkup = samples.map((sample) => {
           const summary = [
@@ -48,42 +66,161 @@
             `repeated=${sample.repeated_field_ratio}`,
             `status=${sample.status}`,
           ].join(' | ');
-          return `<li>${summary}</li>`;
+          return `<li>${escapeHtml(summary)}</li>`;
         }).join('');
+
+        let preparationMarkup = `
+          <h3>Preparation Eligibility</h3>
+          <p><strong>${eligibility.eligible ? 'Eligible' : 'Not Eligible'}</strong></p>
+          <p>${escapeHtml(eligibility.reason || 'Eligibility was not evaluated.')}</p>
+        `;
+        if (eligibility.eligible) {
+          const proposed = proposal.proposed_decision || '';
+          preparationMarkup += `
+            <label for="preparation-decision">Preparation decision</label>
+            <select id="preparation-decision">
+              <option value="">Select a preparation decision</option>
+              <option value="progressive" ${proposed === 'progressive' ? 'selected' : ''}>Treat as progressive</option>
+              <option value="deinterlace_tff" ${proposed === 'deinterlace_tff' ? 'selected' : ''}>Deinterlace TFF</option>
+              <option value="deinterlace_bff" ${proposed === 'deinterlace_bff' ? 'selected' : ''}>Deinterlace BFF</option>
+              <option value="do_not_prepare">Do not prepare</option>
+            </select>
+            <p>${escapeHtml(proposal.reason || '')}</p>
+            <button id="preview-plan-button" type="button">Preview Preparation Plan</button>
+          `;
+        }
 
         resultBox.innerHTML = `
           <h2>Selected Source</h2>
-          <p>${data.relative_source || '—'}</p>
+          <p>${escapeHtml(data.relative_source)}</p>
 
           <h3>Media Summary</h3>
           <ul>
-            <li>Duration: ${data.duration_seconds ? data.duration_seconds.toFixed(2) : '—'}s</li>
-            <li>Codec: ${data.video_stream?.codec || '—'}</li>
-            <li>Resolution: ${data.video_stream?.width || '—'}x${data.video_stream?.height || '—'}</li>
-            <li>SAR: ${data.video_stream?.sample_aspect_ratio || '—'}</li>
-            <li>DAR: ${data.video_stream?.display_aspect_ratio || '—'}</li>
-            <li>Frame Rate: ${data.video_stream?.avg_frame_rate || data.video_stream?.r_frame_rate || '—'}</li>
-            <li>Field Order: ${data.metadata_field_order || '—'}</li>
-            <li>Prepared Geometry: ${geometry.prepared_width || '—'}x${geometry.prepared_height || '—'}</li>
+            <li>Duration: ${data.duration_seconds ? escapeHtml(data.duration_seconds.toFixed(2)) : '—'}s</li>
+            <li>Codec: ${escapeHtml(data.video_stream?.codec)}</li>
+            <li>Resolution: ${escapeHtml(data.video_stream?.width)}x${escapeHtml(data.video_stream?.height)}</li>
+            <li>SAR: ${escapeHtml(data.video_stream?.sample_aspect_ratio)}</li>
+            <li>DAR: ${escapeHtml(data.video_stream?.display_aspect_ratio)}</li>
+            <li>Frame Rate: ${escapeHtml(data.video_stream?.avg_frame_rate || data.video_stream?.r_frame_rate)}</li>
+            <li>Field Order: ${escapeHtml(data.metadata_field_order)}</li>
+            <li>Prepared Geometry: ${escapeHtml(geometry.prepared_width)}x${escapeHtml(geometry.prepared_height)}</li>
           </ul>
 
           <h3>Audio</h3>
-          <ul>${(data.audio_streams || []).map((stream) => `<li>${stream.codec || 'audio'} | channels=${stream.channels || '—'} | lang=${stream.language || '—'}</li>`).join('') || '<li>No audio streams reported.</li>'}</ul>
+          <ul>${(data.audio_streams || []).map((stream) => `<li>${escapeHtml(stream.codec || 'audio')} | channels=${escapeHtml(stream.channels)} | lang=${escapeHtml(stream.language)}</li>`).join('') || '<li>No audio streams reported.</li>'}</ul>
 
           <h3>Subtitles</h3>
-          <ul>${(data.subtitle_streams || []).map((stream) => `<li>${stream.codec || 'subtitle'} | lang=${stream.language || '—'} | title=${stream.title || '—'}</li>`).join('') || '<li>No subtitle streams reported.</li>'}</ul>
+          <ul>${(data.subtitle_streams || []).map((stream) => `<li>${escapeHtml(stream.codec || 'subtitle')} | lang=${escapeHtml(stream.language)} | title=${escapeHtml(stream.title)}</li>`).join('') || '<li>No subtitle streams reported.</li>'}</ul>
 
           <h3>Content Samples</h3>
           <ul>${sampleMarkup || '<li>No idet evidence available.</li>'}</ul>
 
           <h3>Classification</h3>
           <ul>
-            <li>Content: ${data.content_classification || '—'}</li>
-            <li>Final: ${data.final_classification || '—'}</li>
+            <li>Content: ${escapeHtml(data.content_classification)}</li>
+            <li>Final: ${escapeHtml(data.final_classification)}</li>
           </ul>
-          <p>${(data.classification_reasons || []).join(' ') || 'No additional reasons.'}</p>
+          <p>${escapeHtml((data.classification_reasons || []).join(' ') || 'No additional reasons.')}</p>
+          ${preparationMarkup}
         `;
         resultBox.classList.remove('hidden');
+
+        const previewButton = document.getElementById('preview-plan-button');
+        if (previewButton) {
+          previewButton.addEventListener('click', previewPreparationPlan);
+        }
+      }
+
+      function renderPlan(plan) {
+        currentPlan = plan;
+        const target = plan.target_prepared_geometry || {};
+        preparationResultBox.innerHTML = `
+          <h2>Preparation Plan Preview</h2>
+          <ul>
+            <li>Source: ${escapeHtml(plan.source_relative_path)}</li>
+            <li>Analysis: ${escapeHtml(plan.source_analysis_classification?.content)} content / ${escapeHtml(plan.source_analysis_classification?.final)} final</li>
+            <li>Decision: ${escapeHtml(plan.selected_preparation_decision)}</li>
+            <li>Input geometry: ${escapeHtml(plan.source_geometry?.coded_width)}x${escapeHtml(plan.source_geometry?.coded_height)} SAR ${escapeHtml(plan.source_geometry?.sar)}</li>
+            <li>Prepared geometry: ${escapeHtml(target.width)}x${escapeHtml(target.height)} SAR ${escapeHtml(target.sample_aspect_ratio)}</li>
+            <li>Filter: ${escapeHtml(plan.video_filter)}</li>
+            <li>Encoder: ${escapeHtml(plan.video_encoder)} / ${escapeHtml(plan.pixel_format)}</li>
+            <li>Streams: audio ${escapeHtml(plan.audio_policy)}, subtitles ${escapeHtml(plan.subtitle_policy)}, chapters ${escapeHtml(plan.chapter_policy)}</li>
+            <li>Local destination: ${escapeHtml(plan.final_prepared_output_path)}</li>
+          </ul>
+          <p><strong>Review the plan before starting. Preparation is synchronous and may take time.</strong></p>
+          <button id="start-preparation-button" type="button">Start Preparation</button>
+        `;
+        preparationResultBox.classList.remove('hidden');
+        document.getElementById('start-preparation-button').addEventListener('click', executePreparation);
+      }
+
+      async function previewPreparationPlan() {
+        const decision = document.getElementById('preparation-decision')?.value;
+        if (!decision) {
+          preparationResultBox.innerHTML = '<p class="error">Select a preparation decision.</p>';
+          preparationResultBox.classList.remove('hidden');
+          return;
+        }
+        if (decision === 'do_not_prepare') {
+          currentPlan = null;
+          preparationResultBox.innerHTML = '<p>Preparation stopped by Product Owner decision. No output was created.</p>';
+          preparationResultBox.classList.remove('hidden');
+          return;
+        }
+
+        preparationResultBox.innerHTML = '<p>Building and validating the preparation plan…</p>';
+        preparationResultBox.classList.remove('hidden');
+        try {
+          const response = await fetch('/api/media/prepare/plan', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              relative_path: currentAnalysis.relative_source,
+              decision,
+            }),
+          });
+          const payload = await response.json();
+          if (!response.ok) {
+            throw new Error(payload.detail || 'Preparation plan failed.');
+          }
+          renderPlan(payload);
+        } catch (error) {
+          preparationResultBox.innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
+        }
+      }
+
+      async function executePreparation() {
+        if (!currentPlan?.preparation_id) {
+          preparationResultBox.innerHTML = '<p class="error">Preview a valid plan before preparation.</p>';
+          return;
+        }
+        preparationResultBox.innerHTML = '<p>Preparing… Keep this page open while FFmpeg runs.</p>';
+        try {
+          const response = await fetch('/api/media/prepare', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ preparation_id: currentPlan.preparation_id }),
+          });
+          const payload = await response.json();
+          if (!response.ok) {
+            throw new Error(payload.detail || 'Preparation failed.');
+          }
+          const validation = payload.validation || {};
+          preparationResultBox.innerHTML = `
+            <h2>Preparation Result</h2>
+            <ul>
+              <li>Result: ${escapeHtml(payload.status)}</li>
+              <li>Validation: ${escapeHtml(validation.outcome)}</li>
+              <li>Prepared geometry: ${escapeHtml(payload.prepared_geometry?.width)}x${escapeHtml(payload.prepared_geometry?.height)}</li>
+              <li>Encoder: ${escapeHtml(payload.video_encoder)}</li>
+              <li>Frame rate: ${escapeHtml(payload.frame_rate)}</li>
+              <li>Local artifact: ${escapeHtml(payload.prepared_artifact || payload.partial_artifact)}</li>
+            </ul>
+            <p>${escapeHtml((validation.reasons || [payload.reason]).filter(Boolean).join(' '))}</p>
+          `;
+        } catch (error) {
+          preparationResultBox.innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
+        }
       }
 
       async function loadCandidates() {
@@ -119,13 +256,13 @@
           }
           renderSummary(payload);
         } catch (error) {
-          resultBox.innerHTML = `<p class="error">${error.message}</p>`;
+          resultBox.innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
           resultBox.classList.remove('hidden');
         }
       });
 
       loadCandidates().catch((error) => {
-        resultBox.innerHTML = `<p class="error">${error.message}</p>`;
+        resultBox.innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
         resultBox.classList.remove('hidden');
       });
     </script>

@@ -296,8 +296,14 @@ def test_api_discovery_and_analysis_endpoints(monkeypatch, tmp_path):
     (root / "A.mkv").write_bytes(b"contents")
     monkeypatch.setattr(settings, "dvd_source_root", str(root), raising=False)
     monkeypatch.setattr(media_api, "analyze_candidate", lambda relative_path: {"status": "ok", "relative_source": relative_path, "final_classification": "progressive"})
+    monkeypatch.setattr(
+        media_api,
+        "assess_preparation_eligibility",
+        lambda relative_path: {"eligible": True, "status": "eligible", "reason": "eligible"},
+    )
     result = media_api.analyze_media(media_api.MediaAnalysisRequest(relative_path="A.mkv"))
     assert result["final_classification"] == "progressive"
+    assert result["preparation_proposal"]["proposed_decision"] == "progressive"
 
     response = client.post("/api/media/analyze", json={"relative_path": "/tmp/A.mkv"})
     assert response.status_code == 400
@@ -309,3 +315,5 @@ def test_media_page_content_mentions_analysis_workflow():
     assert response.status_code == 200
     assert "Select source candidate" in response.text
     assert "Analyze" in response.text
+    assert "Preview Preparation Plan" in response.text
+    assert "Start Preparation" in response.text
