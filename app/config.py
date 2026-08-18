@@ -5,6 +5,7 @@ class Settings:
     app_name = "DVD RVE Upscaler"
     host = "0.0.0.0"
     port = 8010
+    trusted_nas_movies_root = "/mnt/nas/movies"
     dvd_source_root = "/mnt/nas/movies/DVD"
     preparation_work_root = "/home/chuck/Videos/DVD-RVE-upscaler"
     preparation_timeout_seconds = 21600
@@ -17,7 +18,7 @@ class Settings:
     rve_model = "/home/chuck/apps/real-video-enhancer/bin/models/4xNomos8k_span_otf_medium_no_update_params.pth"
     rve_state_database = "/home/chuck/Videos/DVD-RVE-upscaler/app-state/rve-jobs.sqlite3"
     rve_cancel_grace_seconds = 10
-    app_version = "0.1.4"
+    app_version = "0.1.5"
 
 
 settings = Settings()

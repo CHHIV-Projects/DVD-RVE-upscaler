@@ -51,6 +51,39 @@ def discover_candidates(root: str | Path | None = None) -> list[dict[str, Any]]:
     return sorted(discovered, key=lambda item: item["relative_path"])
 
 
+def discover_candidates_across_locations(
+    locations: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    discovered: list[dict[str, Any]] = []
+    seen_paths: set[Path] = set()
+    ordered_locations = sorted(
+        locations,
+        key=lambda item: (str(item["display_name"]).lower(), str(item["location_id"])),
+    )
+    for location in ordered_locations:
+        root = Path(location["server_root"]).resolve()
+        for candidate in discover_candidates(root):
+            resolved = (root / candidate["relative_path"]).resolve()
+            if resolved in seen_paths:
+                continue
+            seen_paths.add(resolved)
+            discovered.append(
+                {
+                    **candidate,
+                    "location_id": location["location_id"],
+                    "location_name": location["display_name"],
+                }
+            )
+    return sorted(
+        discovered,
+        key=lambda item: (
+            str(item["filename"]).lower(),
+            str(item["location_name"]).lower(),
+            str(item["relative_path"]).lower(),
+        ),
+    )
+
+
 def validate_candidate_relative_path(candidate_relative_path: str | None, root: str | Path | None = None) -> Path:
     if candidate_relative_path is None or not str(candidate_relative_path).strip():
         raise ValueError("A candidate relative path is required.")

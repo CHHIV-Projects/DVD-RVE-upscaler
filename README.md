@@ -1,6 +1,6 @@
 # DVD RVE Upscaler
 
-This repository contains the baseline FastAPI application scaffold for the DVD RVE Upscaler browser workflow.
+This repository contains the LAN-only FastAPI operator application for discovering, analyzing, preparing, and enhancing DVD originals.
 
 ## Local development
 
@@ -14,9 +14,9 @@ pytest
 uvicorn app.main:app --host 0.0.0.0 --port 8010
 ```
 
-Then open the app in a browser at:
+Then open the single operator workflow in a browser at:
 
-- http://127.0.0.1:8010/
-- or the host LAN IP on the same private network, for example http://192.168.1.173:8010/
+- http://127.0.0.1:8010/media
+- or the host LAN URL on the same private network: http://192.168.1.173:8010/media
 
-This milestone intentionally does not implement media discovery, FFmpeg analysis, RVE processing, or NAS publication.
+The LAN URL is the intended target for a future Windows browser shortcut. The application discovers originals only from configured trusted NAS locations, performs preparation and enhancement on server-local storage, and does not publish to the NAS in Milestone 0.1.5.

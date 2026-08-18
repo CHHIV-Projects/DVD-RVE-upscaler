@@ -7,9 +7,12 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.api.media import router as media_router
+from app.api.operator import router as operator_router
 from app.api.rve import router as rve_router
 from app.config import settings
+from app.services.operator_state import OperatorStateStore
 from app.services.rve_jobs import RVEJobManager, RVEJobStore
+from app.services.system_telemetry import TelemetryService
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -18,9 +21,13 @@ async def lifespan(application: FastAPI):
     store = RVEJobStore()
     store.initialize()
     store.reconcile_interrupted()
+    operator_store = OperatorStateStore()
+    operator_store.initialize()
     manager = RVEJobManager(store)
     application.state.rve_store = store
     application.state.rve_manager = manager
+    application.state.operator_store = operator_store
+    application.state.telemetry_service = TelemetryService()
     yield
     manager.shutdown()
 
@@ -30,6 +37,7 @@ app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="stat
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 app.include_router(media_router)
 app.include_router(rve_router)
+app.include_router(operator_router)
 
 
 @app.get("/", response_class=HTMLResponse)

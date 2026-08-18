@@ -432,7 +432,11 @@ def test_plan_and_prepare_api_boundaries(monkeypatch):
         "temporary_output_path": "/internal/prepared.partial.mkv",
         "source_mtime_ns": 1,
     }
-    monkeypatch.setattr(media_api, "create_preparation_plan", lambda relative_path, decision: plan)
+    monkeypatch.setattr(
+        media_api,
+        "create_preparation_plan",
+        lambda relative_path, decision, **kwargs: plan,
+    )
     response = client.post(
         "/api/media/prepare/plan",
         json={"relative_path": "Movie.mkv", "decision": "progressive"},

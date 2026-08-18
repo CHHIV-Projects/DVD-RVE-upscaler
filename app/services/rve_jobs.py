@@ -19,6 +19,7 @@ from app.config import settings
 from app.services.media_analysis import probe_media
 from app.services.media_preparation import (
     load_preparation_plan,
+    preparation_execution_state,
     promote_validated_output,
     validate_prepared_output,
     work_root_is_local,
@@ -280,6 +281,16 @@ class RVEJobStore:
             raise FileNotFoundError("RVE job was not found.")
         return dict(row)
 
+    def list_recent(self, limit: int = 10) -> list[dict[str, Any]]:
+        bounded_limit = max(1, min(int(limit), 50))
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM rve_jobs "
+                "ORDER BY created_at DESC, job_id DESC LIMIT ?",
+                (bounded_limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def claim(self, job_id: str) -> dict[str, Any]:
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -372,6 +383,7 @@ class RVEJobStore:
 def public_job(job: dict[str, Any]) -> dict[str, Any]:
     profile = json.loads(job["profile_json"])
     validation = json.loads(job["output_validation_json"]) if job.get("output_validation_json") else None
+    progress_match = PROGRESS_PATTERN.search(job.get("progress_message") or "")
     return {
         "job_id": job["job_id"],
         "preparation_id": job["preparation_id"],
@@ -391,6 +403,8 @@ def public_job(job: dict[str, Any]) -> dict[str, Any]:
         "exit_code": job["exit_code"],
         "progress_percent": job["progress_percent"],
         "progress_message": job["progress_message"],
+        "progress_fps": int(progress_match.group("fps")) if progress_match else None,
+        "progress_eta": progress_match.group("eta") if progress_match else None,
         "failure_reason": job["failure_reason"],
         "cancellation_reason": job["cancellation_reason"],
         "output_validation_status": job["output_validation_status"],
@@ -499,12 +513,24 @@ def list_local_preparations(
         try:
             plan = load_preparation_plan(directory.name, work_root=root)
             prepared_path = (directory / "prepared.mkv").resolve()
-            validation = (validator or validate_prepared_output)(prepared_path, plan)
+            execution = preparation_execution_state(plan)
+            if execution["preparation_status"] == "plan_ready":
+                validation = {
+                    "outcome": "NOT RUN",
+                    "reasons": ["Preparation plan ready."],
+                }
+            else:
+                validation = (validator or validate_prepared_output)(prepared_path, plan)
             results.append(
                 {
                     "preparation_id": directory.name,
                     "source_relative_path": plan.get("source_relative_path"),
                     "prepared_geometry": plan.get("target_prepared_geometry"),
+                    "selected_preparation_decision": plan.get(
+                        "selected_preparation_decision"
+                    ),
+                    "pixel_format": plan.get("pixel_format"),
+                    **execution,
                     "validation_status": validation.get("outcome"),
                     "available_for_rve": validation.get("outcome") == "PASS",
                     "reason": " ".join(validation.get("reasons", [])),

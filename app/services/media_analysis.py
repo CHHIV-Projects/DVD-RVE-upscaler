@@ -416,8 +416,16 @@ def _metadata_conflicts_with_content(field_order: Any, content_classification: s
     return False
 
 
-def analyze_candidate(relative_path: str | None) -> dict[str, Any]:
-    source_path = validate_candidate_relative_path(relative_path)
+def analyze_candidate(
+    relative_path: str | None,
+    *,
+    root: str | Path | None = None,
+) -> dict[str, Any]:
+    source_path = (
+        validate_candidate_relative_path(relative_path, root=root)
+        if root is not None
+        else validate_candidate_relative_path(relative_path)
+    )
     probe_result = probe_media(source_path)
     if probe_result.get("status") != "ok":
         return {

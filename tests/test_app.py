@@ -7,9 +7,10 @@ from fastapi.testclient import TestClient
 from app.api import media as media_api
 from app.config import settings
 from app.main import app
-from app.services import media_analysis
+from app.services import media_analysis, media_preparation
 from app.services.media_analysis import _classify_samples, compute_square_pixel_geometry, parse_idet_summary, probe_media
 from app.services.media_discovery import discover_candidates, validate_candidate_relative_path
+from app.services.operator_state import OperatorStateStore
 
 client = TestClient(app)
 
@@ -40,7 +41,7 @@ def test_media_page_returns_http_success():
     response = client.get("/media")
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
-    assert "DVD Media Analysis" in response.text
+    assert "DVD RVE Upscaler" in response.text
 
 
 def test_discovery_filters_non_mkv_and_enhanced_candidates(tmp_path, monkeypatch):
@@ -272,7 +273,11 @@ def test_metadata_interlace_conflicts_with_progressive_content(monkeypatch):
         "bff_ratio": 0.0,
         "repeated_field_ratio": 0.0,
     }
-    monkeypatch.setattr(media_analysis, "validate_candidate_relative_path", lambda relative_path: Path("/tmp/input.mkv"))
+    monkeypatch.setattr(
+        media_analysis,
+        "validate_candidate_relative_path",
+        lambda relative_path, root=None: Path("/tmp/input.mkv"),
+    )
     monkeypatch.setattr(media_analysis, "probe_media", lambda source_path: probe_result)
     monkeypatch.setattr(media_analysis, "run_idet_sample", lambda *args, **kwargs: progressive_sample)
 
@@ -286,7 +291,19 @@ def test_metadata_interlace_conflicts_with_progressive_content(monkeypatch):
 
 
 def test_api_discovery_and_analysis_endpoints(monkeypatch, tmp_path):
-    monkeypatch.setattr("app.api.media.discover_candidates", lambda: [{"relative_path": "A.mkv", "filename": "A.mkv"}])
+    monkeypatch.setattr(
+        "app.api.media.discover_candidates",
+        lambda: [{"relative_path": "A.mkv", "filename": "A.mkv", "movie_folder": "."}],
+    )
+    monkeypatch.setattr(
+        media_api,
+        "assess_preparation_eligibility",
+        lambda relative_path, **kwargs: {
+            "eligible": True,
+            "status": "eligible",
+            "reason": "eligible",
+        },
+    )
     response = client.get("/api/media/discover")
     assert response.status_code == 200
     assert response.json()["count"] == 1
@@ -295,25 +312,172 @@ def test_api_discovery_and_analysis_endpoints(monkeypatch, tmp_path):
     root.mkdir()
     (root / "A.mkv").write_bytes(b"contents")
     monkeypatch.setattr(settings, "dvd_source_root", str(root), raising=False)
-    monkeypatch.setattr(media_api, "analyze_candidate", lambda relative_path: {"status": "ok", "relative_source": relative_path, "final_classification": "progressive"})
     monkeypatch.setattr(
         media_api,
-        "assess_preparation_eligibility",
-        lambda relative_path: {"eligible": True, "status": "eligible", "reason": "eligible"},
+        "analyze_candidate",
+        lambda relative_path, root=None: {
+            "status": "ok",
+            "relative_source": relative_path,
+            "final_classification": "progressive",
+        },
     )
-    result = media_api.analyze_media(media_api.MediaAnalysisRequest(relative_path="A.mkv"))
-    assert result["final_classification"] == "progressive"
-    assert result["preparation_proposal"]["proposed_decision"] == "progressive"
+    result = client.post("/api/media/analyze", json={"relative_path": "A.mkv"})
+    assert result.status_code == 200
+    assert result.json()["final_classification"] == "progressive"
+    assert result.json()["preparation_proposal"]["proposed_decision"] == "progressive"
 
     response = client.post("/api/media/analyze", json={"relative_path": "/tmp/A.mkv"})
     assert response.status_code == 400
     assert response.json()["detail"] == "invalid path"
 
 
+def test_prepare_plan_is_idempotent_for_same_workflow_and_rejects_conflicts(tmp_path, monkeypatch):
+    movies = tmp_path / "movies"
+    root = movies / "Library DVDs"
+    source_folder = root / "Ratatouille"
+    source_folder.mkdir(parents=True)
+    source = source_folder / "Ratatouille - DVD Original.mkv"
+    source.write_bytes(b"movie")
+    monkeypatch.setattr(settings, "dvd_source_root", str(root), raising=False)
+    monkeypatch.setattr(settings, "trusted_nas_movies_root", str(movies), raising=False)
+    state_path = tmp_path / "state.sqlite3"
+    store = OperatorStateStore(state_path)
+    store.initialize()
+    source_location = store.list_locations(role="ORIGINAL_SOURCE")[0]
+    destination = store.create_location("DVD Upscaled", "FINISHED_DESTINATION", "DVD Upscaled")
+    relative_path = "Ratatouille/Ratatouille - DVD Original.mkv"
+    workflow = store.create_workflow(source_location["location_id"], relative_path)
+    with store._connect() as connection:
+        connection.execute(
+            """
+            UPDATE operator_workflows
+            SET destination_location_id = ?, destination_relative_folder = ?
+            WHERE workflow_id = ?
+            """,
+            (destination["location_id"], "Ratatouille", workflow["workflow_id"]),
+        )
+    monkeypatch.setattr(app.state, "operator_store", store, raising=False)
+    work_root = tmp_path / "prepwork"
+    monkeypatch.setattr(settings, "preparation_work_root", str(work_root), raising=False)
+    analysis = {
+        "status": "ok",
+        "content_classification": "progressive",
+        "final_classification": "progressive",
+        "analysis_status": "ok",
+        "classification_reasons": ["Progressive."],
+        "geometry": {
+            "status": "ok",
+            "prepared_width": 854,
+            "prepared_height": 480,
+        },
+        "video_stream": {"avg_frame_rate": "30000/1001"},
+        "duration_seconds": 100.0,
+        "audio_streams": [],
+        "subtitle_streams": [],
+        "chapter_count": 0,
+    }
+    monkeypatch.setattr(media_api, "analyze_candidate", lambda *args, **kwargs: dict(analysis))
+    monkeypatch.setattr(
+        media_api,
+        "assess_preparation_eligibility",
+        lambda *args, **kwargs: {"eligible": True, "status": "eligible", "reason": "Eligible."},
+    )
+    monkeypatch.setattr(
+        media_preparation,
+        "assess_preparation_eligibility",
+        lambda *args, **kwargs: {"eligible": True, "status": "eligible", "reason": "Eligible."},
+    )
+    monkeypatch.setattr(media_preparation, "analyze_candidate", lambda *args, **kwargs: dict(analysis))
+    monkeypatch.setattr(media_preparation, "work_root_is_local", lambda path: True)
+
+    destination_response = client.patch(
+        f"/api/workflows/{workflow['workflow_id']}/destination",
+        json={"destination_location_id": destination["location_id"]},
+    )
+    assert destination_response.status_code == 200
+    assert destination_response.json()["destination_relative_folder"] is None
+    with store._connect() as connection:
+        stored_folder = connection.execute(
+            "SELECT destination_relative_folder FROM operator_workflows WHERE workflow_id = ?",
+            (workflow["workflow_id"],),
+        ).fetchone()[0]
+    assert stored_folder is None
+
+    analyzed = client.post(
+        "/api/media/analyze",
+        json={
+            "location_id": source_location["location_id"],
+            "relative_path": relative_path,
+        },
+    )
+    assert analyzed.status_code == 200
+
+    first = client.post(
+        "/api/media/prepare/plan",
+        json={
+            "location_id": source_location["location_id"],
+            "workflow_id": workflow["workflow_id"],
+            "relative_path": relative_path,
+            "decision": "progressive",
+        },
+    )
+    reopened = OperatorStateStore(state_path)
+    reopened.initialize()
+    monkeypatch.setattr(app.state, "operator_store", reopened, raising=False)
+    second = client.post(
+        "/api/media/prepare/plan",
+        json={
+            "location_id": source_location["location_id"],
+            "workflow_id": workflow["workflow_id"],
+            "relative_path": relative_path,
+            "decision": "progressive",
+        },
+    )
+    assert first.status_code == 200
+    assert second.status_code == 200
+    plan_id = first.json()["preparation_id"]
+    assert second.json()["preparation_id"] == plan_id
+    assert first.json()["preparation_status"] == "plan_ready"
+    assert second.json()["ready_to_prepare"] is True
+    assert reopened.get_workflow(workflow["workflow_id"])["preparation_id"] == plan_id
+    assert [path.parent.name for path in work_root.glob("*/plan.json")] == [plan_id]
+
+    (work_root / plan_id / "prepared.mkv").write_bytes(b"completed")
+    third = client.post(
+        "/api/media/prepare/plan",
+        json={
+            "location_id": source_location["location_id"],
+            "workflow_id": workflow["workflow_id"],
+            "relative_path": relative_path,
+            "decision": "progressive",
+        },
+    )
+    assert third.status_code == 200
+    assert third.json()["preparation_id"] == plan_id
+    assert third.json()["preparation_status"] == "completed"
+    assert third.json()["ready_to_prepare"] is False
+
+    conflict = client.post(
+        "/api/media/prepare/plan",
+        json={
+            "location_id": source_location["location_id"],
+            "workflow_id": workflow["workflow_id"],
+            "relative_path": relative_path,
+            "decision": "deinterlace_tff",
+        },
+    )
+    assert conflict.status_code == 422
+    assert "conflicts" in conflict.json()["detail"]
+    with pytest.raises(ValueError, match="different preparation"):
+        reopened.associate_preparation(workflow["workflow_id"], "f" * 32)
+
+
 def test_media_page_content_mentions_analysis_workflow():
     response = client.get("/media")
     assert response.status_code == 200
-    assert "Select source candidate" in response.text
-    assert "Analyze" in response.text
-    assert "Preview Preparation Plan" in response.text
-    assert "Start Preparation" in response.text
+    assert "Find DVD" in response.text
+    assert "Finished Movie Destination" in response.text
+    assert "Analyze DVD" in response.text
+    assert "Review Preparation Plan" in response.text
+    assert "Prepare DVD" in response.text
+    assert "destination_relative_folder" not in response.text

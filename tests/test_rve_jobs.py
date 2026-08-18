@@ -151,11 +151,47 @@ def test_create_job_accepts_only_validator_pass_preparation(tmp_path, monkeypatc
             "preparation_id": preparation_id,
             "source_relative_path": None,
             "prepared_geometry": {"width": 854, "height": 480},
+            "selected_preparation_decision": None,
+            "pixel_format": None,
+            "preparation_status": "completed",
+            "ready_to_prepare": False,
             "validation_status": "PASS",
             "available_for_rve": True,
             "reason": "valid",
         }
     ]
+
+
+def test_unexecuted_plan_is_ready_but_started_missing_output_is_failure(
+    tmp_path, monkeypatch
+):
+    work_root = tmp_path / "work"
+    preparation_id = "c" * 32
+    directory = work_root / preparation_id
+    directory.mkdir(parents=True)
+    plan = {
+        "preparation_id": preparation_id,
+        "working_directory": str(directory),
+        "temporary_output_path": str(directory / "prepared.partial.mkv"),
+        "final_prepared_output_path": str(directory / "prepared.mkv"),
+        "target_prepared_geometry": {"width": 854, "height": 480},
+        "selected_preparation_decision": "progressive",
+        "pixel_format": "yuv420p",
+    }
+    (directory / "plan.json").write_text(json.dumps(plan))
+
+    ready = list_local_preparations(work_root=work_root)
+    assert ready[0]["preparation_status"] == "plan_ready"
+    assert ready[0]["ready_to_prepare"] is True
+    assert ready[0]["validation_status"] == "NOT RUN"
+    assert ready[0]["reason"] == "Preparation plan ready."
+
+    (directory / "execution.started").write_text("started\n")
+    missing = list_local_preparations(work_root=work_root)
+    assert missing[0]["preparation_status"] == "output_missing"
+    assert missing[0]["ready_to_prepare"] is False
+    assert missing[0]["validation_status"] == "FAIL"
+    assert missing[0]["reason"] == "Prepared output file is missing."
 
 
 @pytest.mark.parametrize("outcome", ["FAIL", "WARNING / REVIEW REQUIRED"])
@@ -467,5 +503,68 @@ def test_media_page_contains_minimal_rve_workflow():
     assert "Create RVE Job" in response.text
     assert "Start Enhancement" in response.text
     assert "Cancel Enhancement" in response.text
-    assert "setInterval(refreshRveJob" in response.text
+    assert "window.setInterval(refreshRveJob" in response.text
     assert "/api/rve/preparations" in response.text
+
+
+def test_recent_job_store_retains_all_terminal_and_active_states(store, tmp_path):
+    states = ["running", "completed", "failed", "cancelled", "interrupted"]
+    for index, state in enumerate(states):
+        record = job_record(tmp_path, f"{index + 1:032x}", state=state)
+        record["created_at"] = f"2026-08-18T00:00:0{index}+00:00"
+        store.insert(record)
+
+    recent = store.list_recent(10)
+
+    assert [job["state"] for job in recent] == list(reversed(states))
+    assert store.get(recent[0]["job_id"])["state"] == "interrupted"
+
+
+def test_recent_jobs_api_presents_friendly_source_and_durable_state(monkeypatch, tmp_path):
+    record = job_record(tmp_path, "e" * 32, state="completed")
+    record["output_validation_status"] = "PASS"
+
+    class FakeStore:
+        def list_recent(self, limit):
+            return [record]
+
+    class FakeOperatorStore:
+        def find_workflow_by_job(self, job_id):
+            return None
+
+    monkeypatch.setattr(
+        rve_api,
+        "load_preparation_plan",
+        lambda preparation_id: {"source_relative_path": "The Usual Suspects/Movie.mkv"},
+    )
+    app.state.rve_store = FakeStore()
+    app.state.operator_store = FakeOperatorStore()
+
+    response = client.get("/api/rve/jobs?limit=10")
+
+    assert response.status_code == 200
+    job = response.json()["jobs"][0]
+    assert job["movie_name"] == "The Usual Suspects"
+    assert job["state"] == "completed"
+    assert job["output_validation_status"] == "PASS"
+
+
+def test_duplicate_workflow_job_is_rejected_before_job_creation(monkeypatch):
+    calls = []
+
+    class FakeOperatorStore:
+        def find_workflow_by_preparation(self, preparation_id):
+            return {"rve_job_id": "f" * 32}
+
+    app.state.operator_store = FakeOperatorStore()
+    app.state.rve_store = object()
+    monkeypatch.setattr(
+        rve_api,
+        "create_rve_job",
+        lambda preparation_id, store: calls.append(preparation_id),
+    )
+
+    response = client.post("/api/rve/jobs", json={"preparation_id": "a" * 32})
+
+    assert response.status_code == 409
+    assert calls == []

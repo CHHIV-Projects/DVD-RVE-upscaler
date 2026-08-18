@@ -3,45 +3,168 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>DVD Media Analysis and Preparation</title>
+    <title>DVD RVE Upscaler</title>
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
     <main class="container media-page">
-      <h1>DVD Media Analysis and Preparation</h1>
-      <p class="muted">Analyze immutable DVD originals, review a controlled plan, and prepare only to local NVMe.</p>
+      <header class="app-header">
+        <div>
+          <p class="eyebrow">DVD enhancement workflow</p>
+          <h1>DVD RVE Upscaler</h1>
+          <p class="muted">Find an original DVD, choose its intended destination, prepare it, and enhance it.</p>
+        </div>
+        <button id="settings-button" class="secondary" type="button">Library Locations</button>
+      </header>
 
-      <section class="panel">
-        <label for="candidate-select">Select source candidate</label>
-        <select id="candidate-select" aria-label="Select a DVD source candidate"></select>
-        <button id="analyze-button" type="button">Analyze</button>
+      <ol class="stage-list" aria-label="Workflow stages">
+        <li id="stage-find" class="active">1. Find DVD</li>
+        <li id="stage-destination">2. Destination</li>
+        <li id="stage-prepare">3. Analyze &amp; Prepare</li>
+        <li id="stage-enhance">4. Enhance</li>
+        <li id="stage-complete">5. Complete</li>
+      </ol>
+
+      <section id="settings-panel" class="panel hidden" aria-live="polite">
+        <div class="section-heading">
+          <div>
+            <h2>Library Locations</h2>
+            <p class="muted">Locations are configuration only. This application does not write to the NAS.</p>
+          </div>
+          <button id="close-settings-button" class="secondary" type="button">Close</button>
+        </div>
+        <div class="settings-grid">
+          <div>
+            <h3>Original DVD Sources</h3>
+            <div id="source-location-list"></div>
+          </div>
+          <div>
+            <h3>Finished Movie Destinations</h3>
+            <div id="destination-location-list"></div>
+          </div>
+        </div>
+        <form id="add-location-form" class="inline-form">
+          <label>
+            Role
+            <select id="new-location-role">
+              <option value="ORIGINAL_SOURCE">Original DVD Source</option>
+              <option value="FINISHED_DESTINATION">Finished Movie Destination</option>
+            </select>
+          </label>
+          <label>
+            Display name
+            <input id="new-location-name" maxlength="120" required />
+          </label>
+          <label>
+            Folder beneath Movies share
+            <input id="new-location-folder" placeholder="DVD Originals" required />
+          </label>
+          <button type="submit">Add Location</button>
+        </form>
+        <p id="location-message" class="message"></p>
       </section>
 
-      <section id="result" class="panel hidden" aria-live="polite"></section>
-      <section id="preparation-result" class="panel hidden" aria-live="polite"></section>
-      <section class="panel">
-        <h2>Validated Local Preparation</h2>
-        <p class="muted">Select a server-owned preparation that still passes the locked validator.</p>
-        <select id="rve-preparation-select" aria-label="Select a validated local preparation"></select>
-        <button id="create-existing-rve-job-button" type="button">Create RVE Job</button>
+      <section class="panel workflow-card" id="find-panel">
+        <div class="step-number">1</div>
+        <div class="step-content">
+          <h2>Find DVD</h2>
+          <div class="search-row">
+            <input id="source-search" type="search" placeholder="Search filename, movie folder, or source location" />
+            <button id="search-button" type="button">Search</button>
+            <button id="refresh-sources-button" class="secondary" type="button">Refresh Sources</button>
+          </div>
+          <label for="candidate-select">Original DVD results</label>
+          <select id="candidate-select" size="6" aria-label="Searchable DVD source results"></select>
+          <div id="candidate-summary" class="selection-summary muted">Select a DVD result.</div>
+          <button id="select-source-button" type="button">Use Selected DVD</button>
+        </div>
       </section>
-      <section id="rve-result" class="panel hidden" aria-live="polite"></section>
+
+      <section class="panel workflow-card" id="destination-panel">
+        <div class="step-number">2</div>
+        <div class="step-content">
+          <h2>Destination</h2>
+          <p class="muted">Choose the approved finished movie destination. Files remain staged in the selected destination root and no publication occurs in this milestone.</p>
+          <label for="destination-select">Finished Movie Destination</label>
+          <select id="destination-select"></select>
+          <button id="save-destination-button" type="button">Save Intended Destination</button>
+          <p id="destination-message" class="message"></p>
+        </div>
+      </section>
+
+      <section class="panel workflow-card" id="analysis-panel">
+        <div class="step-number">3</div>
+        <div class="step-content">
+          <h2>Analyze &amp; Prepare</h2>
+          <div id="analysis-empty">
+            <p class="muted">Select a DVD and destination to continue.</p>
+            <button id="analyze-button" type="button">Analyze DVD</button>
+          </div>
+          <div id="analysis-result" class="hidden" aria-live="polite"></div>
+          <div id="preparation-result" class="hidden" aria-live="polite"></div>
+        </div>
+      </section>
+
+      <section class="panel workflow-card" id="enhance-panel">
+        <div class="step-number">4</div>
+        <div class="step-content">
+          <h2>Enhance</h2>
+          <div class="profile-card">
+            <strong>DVD RVE Medium 2x</strong>
+            <span>Nomos8k Realistic Medium</span>
+            <span>Scale: 2x</span>
+            <span>Interpolation: Off</span>
+          </div>
+          <button id="create-rve-job-button" type="button">Create Enhancement Job</button>
+          <div id="rve-result" class="hidden" aria-live="polite"></div>
+          <details>
+            <summary>Recover an existing validated preparation</summary>
+            <p class="muted">Use a server-owned preparation that still passes the locked validator.</p>
+            <select id="rve-preparation-select"></select>
+            <button id="create-existing-rve-job-button" type="button">Create RVE Job</button>
+          </details>
+        </div>
+      </section>
+
+      <section class="panel workflow-card" id="completion-panel">
+        <div class="step-number">5</div>
+        <div class="step-content">
+          <h2>Completion</h2>
+          <div id="completion-result">
+            <p class="muted">Validated enhancement results will appear here.</p>
+          </div>
+        </div>
+      </section>
+
+      <div class="dashboard-grid">
+        <section class="panel">
+          <h2>System Status</h2>
+          <div id="telemetry-panel" aria-live="polite">Loading read-only telemetry…</div>
+        </section>
+        <section class="panel">
+          <h2>Recent Jobs</h2>
+          <div id="recent-jobs" aria-live="polite">Loading durable job history…</div>
+        </section>
+      </div>
     </main>
 
     <script>
-      const candidateSelect = document.getElementById('candidate-select');
-      const resultBox = document.getElementById('result');
-      const preparationResultBox = document.getElementById('preparation-result');
-      const rveResultBox = document.getElementById('rve-result');
-      const rvePreparationSelect = document.getElementById('rve-preparation-select');
-      const analyzeButton = document.getElementById('analyze-button');
-      let currentAnalysis = null;
-      let currentPlan = null;
-      let currentRveJob = null;
-      let rvePollTimer = null;
+      const state = {
+        allCandidates: [],
+        candidates: [],
+        locations: [],
+        workflow: null,
+        analysis: null,
+        plan: null,
+        preparations: [],
+        job: null,
+        rvePollTimer: null,
+      };
+
+      const byId = (id) => document.getElementById(id);
 
       function escapeHtml(value) {
-        return String(value ?? '—')
+        return String(value ?? 'Unavailable')
           .replaceAll('&', '&amp;')
           .replaceAll('<', '&lt;')
           .replaceAll('>', '&gt;')
@@ -49,353 +172,624 @@
           .replaceAll("'", '&#039;');
       }
 
-      function renderCandidateOptions(candidates) {
-        candidateSelect.innerHTML = '';
-        candidates.forEach((candidate) => {
-          const option = document.createElement('option');
-          option.value = candidate.relative_path;
-          option.textContent = candidate.relative_path;
-          candidateSelect.appendChild(option);
+      async function api(url, options = {}) {
+        const response = await fetch(url, options);
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.detail || 'Request failed.');
+        return payload;
+      }
+
+      function jsonRequest(method, body) {
+        return { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
+      }
+
+      function friendlyState(value) {
+        return String(value || 'unknown').replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+      }
+
+      function formatTimestamp(value) {
+        if (!value) return '—';
+        const date = new Date(value);
+        return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+      }
+
+      function elapsedSince(value, finishedAt = null) {
+        if (!value) return '—';
+        const start = new Date(value).getTime();
+        const end = finishedAt ? new Date(finishedAt).getTime() : Date.now();
+        if (!Number.isFinite(start) || !Number.isFinite(end)) return '—';
+        const total = Math.max(0, Math.floor((end - start) / 1000));
+        const hours = String(Math.floor(total / 3600)).padStart(2, '0');
+        const minutes = String(Math.floor((total % 3600) / 60)).padStart(2, '0');
+        const seconds = String(total % 60).padStart(2, '0');
+        return `${hours}:${minutes}:${seconds}`;
+      }
+
+      function updateStages(active) {
+        const stages = ['find', 'destination', 'prepare', 'enhance', 'complete'];
+        const activeIndex = stages.indexOf(active);
+        stages.forEach((stage, index) => {
+          const element = byId(`stage-${stage}`);
+          element.classList.toggle('active', index === activeIndex);
+          element.classList.toggle('done', index < activeIndex);
         });
       }
 
-      function renderSummary(data) {
-        currentAnalysis = data;
-        currentPlan = null;
-        preparationResultBox.classList.add('hidden');
-        const geometry = data.geometry || {};
-        const samples = Array.isArray(data.idet_samples) ? data.idet_samples : [];
-        const eligibility = data.preparation_eligibility || {};
-        const proposal = data.preparation_proposal || {};
-
-        const sampleMarkup = samples.map((sample) => {
-          const summary = [
-            `sample=${sample.sample_time}s`,
-            `progressive=${sample.progressive_ratio}`,
-            `tff=${sample.tff_ratio}`,
-            `bff=${sample.bff_ratio}`,
-            `repeated=${sample.repeated_field_ratio}`,
-            `status=${sample.status}`,
-          ].join(' | ');
-          return `<li>${escapeHtml(summary)}</li>`;
-        }).join('');
-
-        let preparationMarkup = `
-          <h3>Preparation Eligibility</h3>
-          <p><strong>${eligibility.eligible ? 'Eligible' : 'Not Eligible'}</strong></p>
-          <p>${escapeHtml(eligibility.reason || 'Eligibility was not evaluated.')}</p>
+      function publicLocationCard(location) {
+        return `
+          <div class="location-card">
+            <div>
+              <strong>${escapeHtml(location.display_name)}</strong>
+              <span>${escapeHtml(location.display_path)}</span>
+            </div>
+            <div class="button-row">
+              <input id="location-name-${escapeHtml(location.location_id)}" class="location-name-input"
+                aria-label="Edit ${escapeHtml(location.display_name)} name" value="${escapeHtml(location.display_name)}" />
+              <button class="secondary location-rename" data-location-id="${escapeHtml(location.location_id)}">Save Name</button>
+              <button class="secondary location-toggle" data-location-id="${escapeHtml(location.location_id)}"
+                data-enabled="${location.enabled}">${location.enabled ? 'Disable' : 'Enable'}</button>
+            </div>
+          </div>
         `;
-        if (eligibility.eligible) {
-          const proposed = proposal.proposed_decision || '';
-          preparationMarkup += `
+      }
+
+      function renderAnalysisGuidance() {
+        const empty = byId('analysis-empty');
+        const hasSource = Boolean(state.workflow?.source_location_id);
+        const hasDestination = Boolean(state.workflow?.destination_location_id);
+        const button = '<button id="analyze-button" type="button">Analyze DVD</button>';
+
+        if (!hasSource || !hasDestination) {
+          empty.classList.remove('hidden');
+          empty.innerHTML = '<p class="muted">Select a DVD and destination to continue.</p>' + button;
+          byId('analyze-button')?.addEventListener('click', analyzeDvd);
+          return;
+        }
+
+        if (!state.analysis) {
+          empty.classList.remove('hidden');
+          empty.innerHTML = '<p class="muted">Analyze the selected DVD to continue.</p>' + button;
+          byId('analyze-button')?.addEventListener('click', analyzeDvd);
+          return;
+        }
+
+        empty.classList.add('hidden');
+      }
+
+      async function loadLocations() {
+        const payload = await api('/api/library-locations');
+        state.locations = payload.locations;
+        const sources = state.locations.filter((location) => location.role === 'ORIGINAL_SOURCE');
+        const destinations = state.locations.filter((location) => location.role === 'FINISHED_DESTINATION');
+        byId('source-location-list').innerHTML = sources.map(publicLocationCard).join('') || '<p>No source locations configured.</p>';
+        byId('destination-location-list').innerHTML = destinations.map(publicLocationCard).join('') || '<p>No destination locations configured.</p>';
+        byId('destination-select').innerHTML = destinations
+          .filter((location) => location.enabled)
+          .map((location) => `<option value="${escapeHtml(location.location_id)}">${escapeHtml(location.display_name)}</option>`)
+          .join('');
+        document.querySelectorAll('.location-toggle').forEach((button) => {
+          button.addEventListener('click', () => toggleLocation(button));
+        });
+        document.querySelectorAll('.location-rename').forEach((button) => {
+          button.addEventListener('click', () => renameLocation(button));
+        });
+        if (state.workflow?.destination_location_id) {
+          byId('destination-select').value = state.workflow.destination_location_id;
+        }
+      }
+
+      async function addLocation(event) {
+        event.preventDefault();
+        const message = byId('location-message');
+        try {
+          await api('/api/library-locations', jsonRequest('POST', {
+            display_name: byId('new-location-name').value,
+            role: byId('new-location-role').value,
+            folder: byId('new-location-folder').value,
+          }));
+          event.target.reset();
+          message.textContent = 'Library location added. No NAS content was changed.';
+          message.className = 'message success';
+          await loadLocations();
+          await discoverSources();
+        } catch (error) {
+          message.textContent = error.message;
+          message.className = 'message error';
+        }
+      }
+
+      async function toggleLocation(button) {
+        try {
+          await api(`/api/library-locations/${button.dataset.locationId}`, jsonRequest('PATCH', {
+            enabled: button.dataset.enabled !== 'true',
+          }));
+          await loadLocations();
+          await discoverSources();
+        } catch (error) {
+          byId('location-message').textContent = error.message;
+          byId('location-message').className = 'message error';
+        }
+      }
+
+      async function renameLocation(button) {
+        const displayName = byId(`location-name-${button.dataset.locationId}`).value;
+        if (!displayName.trim()) return;
+        try {
+          await api(`/api/library-locations/${button.dataset.locationId}`, jsonRequest('PATCH', {
+            display_name: displayName,
+          }));
+          await loadLocations();
+          await discoverSources();
+        } catch (error) {
+          byId('location-message').textContent = error.message;
+          byId('location-message').className = 'message error';
+        }
+      }
+
+      function selectedCandidate() {
+        const index = Number(byId('candidate-select').value);
+        return Number.isInteger(index) ? state.candidates[index] : null;
+      }
+
+      function renderCandidateSummary() {
+        const candidate = selectedCandidate();
+        if (!candidate) {
+          byId('candidate-summary').textContent = 'Select a DVD result.';
+          return;
+        }
+        const eligibility = candidate.preparation_eligibility || {};
+        byId('candidate-summary').innerHTML = `
+          <strong>${escapeHtml(candidate.filename)}</strong><br />
+          Folder: ${escapeHtml(candidate.movie_folder)}<br />
+          Location: ${escapeHtml(candidate.location_name)}<br />
+          Preparation: ${eligibility.eligible ? 'Eligible' : `Not eligible — ${escapeHtml(eligibility.reason)}`}
+        `;
+      }
+
+      async function discoverSources() {
+        const payload = await api('/api/media/discover');
+        state.allCandidates = payload.candidates;
+        filterSources();
+      }
+
+      function filterSources() {
+        const query = byId('source-search').value.trim().toLowerCase();
+        state.candidates = state.allCandidates.filter((candidate) => (
+          !query || [candidate.filename, candidate.movie_folder, candidate.location_name]
+            .join(' ')
+            .toLowerCase()
+            .includes(query)
+        ));
+        byId('candidate-select').innerHTML = state.candidates.map((candidate, index) => `
+          <option value="${index}">${escapeHtml(candidate.filename)} — ${escapeHtml(candidate.location_name)}</option>
+        `).join('');
+        renderCandidateSummary();
+      }
+
+      async function selectSource() {
+        const candidate = selectedCandidate();
+        if (!candidate) return;
+        try {
+          state.workflow = await api('/api/workflows', jsonRequest('POST', {
+            source_location_id: candidate.location_id,
+            source_relative_path: candidate.relative_path,
+          }));
+          state.analysis = null;
+          state.plan = null;
+          state.job = null;
+          byId('destination-message').textContent = `Selected ${candidate.filename} from ${candidate.location_name}.`;
+          renderAnalysisGuidance();
+          updateStages('destination');
+        } catch (error) {
+          byId('candidate-summary').innerHTML = `<span class="error">${escapeHtml(error.message)}</span>`;
+        }
+      }
+
+      async function loadCurrentWorkflow() {
+        const payload = await api('/api/workflows/current');
+        state.workflow = payload.workflow;
+        if (!state.workflow) return;
+        byId('create-rve-job-button').classList.toggle('hidden', Boolean(state.workflow.rve_job_id));
+        if (state.workflow.destination_location_id) {
+          byId('destination-select').value = state.workflow.destination_location_id;
+          byId('destination-message').textContent = `Intended destination: ${state.workflow.destination_location_name}. Publication has not occurred.`;
+        }
+        renderAnalysisGuidance();
+      }
+
+      async function saveDestination() {
+        const message = byId('destination-message');
+        if (!state.workflow) {
+          message.textContent = 'Select a DVD first.';
+          message.className = 'message error';
+          return;
+        }
+        if (!byId('destination-select').value) {
+          message.textContent = 'Configure and select a Finished Movie Destination.';
+          message.className = 'message error';
+          return;
+        }
+        try {
+          state.workflow = await api(
+            `/api/workflows/${state.workflow.workflow_id}/destination`,
+            jsonRequest('PATCH', {
+              destination_location_id: byId('destination-select').value,
+            }),
+          );
+          message.textContent = `Intended destination saved: ${state.workflow.destination_location_name}. Publication has not occurred.`;
+          message.className = 'message success';
+          renderAnalysisGuidance();
+          updateStages('prepare');
+        } catch (error) {
+          message.textContent = error.message;
+          message.className = 'message error';
+        }
+      }
+
+      async function analyzeDvd() {
+        if (!state.workflow?.destination_location_id) {
+          byId('analysis-result').innerHTML = '<p class="error">Select and save an intended destination first.</p>';
+          byId('analysis-result').classList.remove('hidden');
+          return;
+        }
+        byId('analysis-result').innerHTML = '<p>Analyzing DVD content…</p>';
+        byId('analysis-result').classList.remove('hidden');
+        try {
+          state.analysis = await api('/api/media/analyze', jsonRequest('POST', {
+            location_id: state.workflow.source_location_id,
+            relative_path: state.workflow.source_relative_path,
+          }));
+          renderAnalysis();
+        } catch (error) {
+          byId('analysis-result').innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
+        }
+      }
+
+      function renderAnalysis() {
+        const analysis = state.analysis;
+        const review = analysis.analysis_status === 'review_required';
+        const proposal = analysis.preparation_proposal || {};
+        const eligibility = analysis.preparation_eligibility || {};
+        const proposed = proposal.proposed_decision || '';
+        byId('analysis-result').innerHTML = `
+          <div class="result-banner ${review ? 'warning' : 'success'}">
+            <strong>Content: ${escapeHtml(friendlyState(analysis.content_classification))}</strong>
+            <span>Final decision: ${escapeHtml(friendlyState(analysis.final_classification))}</span>
+            <span>${review ? 'DVD metadata and decoded content require Product Owner review.' : 'Analysis is ready for preparation.'}</span>
+          </div>
+          <p>${escapeHtml((analysis.classification_reasons || []).join(' '))}</p>
+          <div class="decision-row">
             <label for="preparation-decision">Preparation decision</label>
             <select id="preparation-decision">
-              <option value="">Select a preparation decision</option>
+              <option value="">Select a decision</option>
               <option value="progressive" ${proposed === 'progressive' ? 'selected' : ''}>Treat as progressive</option>
               <option value="deinterlace_tff" ${proposed === 'deinterlace_tff' ? 'selected' : ''}>Deinterlace TFF</option>
               <option value="deinterlace_bff" ${proposed === 'deinterlace_bff' ? 'selected' : ''}>Deinterlace BFF</option>
               <option value="do_not_prepare">Do not prepare</option>
             </select>
-            <p>${escapeHtml(proposal.reason || '')}</p>
-            <button id="preview-plan-button" type="button">Preview Preparation Plan</button>
-          `;
-        }
-
-        resultBox.innerHTML = `
-          <h2>Selected Source</h2>
-          <p>${escapeHtml(data.relative_source)}</p>
-
-          <h3>Media Summary</h3>
-          <ul>
-            <li>Duration: ${data.duration_seconds ? escapeHtml(data.duration_seconds.toFixed(2)) : '—'}s</li>
-            <li>Codec: ${escapeHtml(data.video_stream?.codec)}</li>
-            <li>Resolution: ${escapeHtml(data.video_stream?.width)}x${escapeHtml(data.video_stream?.height)}</li>
-            <li>SAR: ${escapeHtml(data.video_stream?.sample_aspect_ratio)}</li>
-            <li>DAR: ${escapeHtml(data.video_stream?.display_aspect_ratio)}</li>
-            <li>Frame Rate: ${escapeHtml(data.video_stream?.avg_frame_rate || data.video_stream?.r_frame_rate)}</li>
-            <li>Field Order: ${escapeHtml(data.metadata_field_order)}</li>
-            <li>Prepared Geometry: ${escapeHtml(geometry.prepared_width)}x${escapeHtml(geometry.prepared_height)}</li>
-          </ul>
-
-          <h3>Audio</h3>
-          <ul>${(data.audio_streams || []).map((stream) => `<li>${escapeHtml(stream.codec || 'audio')} | channels=${escapeHtml(stream.channels)} | lang=${escapeHtml(stream.language)}</li>`).join('') || '<li>No audio streams reported.</li>'}</ul>
-
-          <h3>Subtitles</h3>
-          <ul>${(data.subtitle_streams || []).map((stream) => `<li>${escapeHtml(stream.codec || 'subtitle')} | lang=${escapeHtml(stream.language)} | title=${escapeHtml(stream.title)}</li>`).join('') || '<li>No subtitle streams reported.</li>'}</ul>
-
-          <h3>Content Samples</h3>
-          <ul>${sampleMarkup || '<li>No idet evidence available.</li>'}</ul>
-
-          <h3>Classification</h3>
-          <ul>
-            <li>Content: ${escapeHtml(data.content_classification)}</li>
-            <li>Final: ${escapeHtml(data.final_classification)}</li>
-          </ul>
-          <p>${escapeHtml((data.classification_reasons || []).join(' ') || 'No additional reasons.')}</p>
-          ${preparationMarkup}
+            <button id="preview-plan-button" type="button" ${eligibility.eligible ? '' : 'disabled'}>Review Preparation Plan</button>
+          </div>
+          <details>
+            <summary>Advanced Details</summary>
+            <pre>${escapeHtml(JSON.stringify(analysis, null, 2))}</pre>
+          </details>
         `;
-        resultBox.classList.remove('hidden');
-
-        const previewButton = document.getElementById('preview-plan-button');
-        if (previewButton) {
-          previewButton.addEventListener('click', previewPreparationPlan);
-        }
-      }
-
-      function renderPlan(plan) {
-        currentPlan = plan;
-        const target = plan.target_prepared_geometry || {};
-        preparationResultBox.innerHTML = `
-          <h2>Preparation Plan Preview</h2>
-          <ul>
-            <li>Source: ${escapeHtml(plan.source_relative_path)}</li>
-            <li>Analysis: ${escapeHtml(plan.source_analysis_classification?.content)} content / ${escapeHtml(plan.source_analysis_classification?.final)} final</li>
-            <li>Decision: ${escapeHtml(plan.selected_preparation_decision)}</li>
-            <li>Input geometry: ${escapeHtml(plan.source_geometry?.coded_width)}x${escapeHtml(plan.source_geometry?.coded_height)} SAR ${escapeHtml(plan.source_geometry?.sar)}</li>
-            <li>Prepared geometry: ${escapeHtml(target.width)}x${escapeHtml(target.height)} SAR ${escapeHtml(target.sample_aspect_ratio)}</li>
-            <li>Filter: ${escapeHtml(plan.video_filter)}</li>
-            <li>Encoder: ${escapeHtml(plan.video_encoder)} / ${escapeHtml(plan.pixel_format)}</li>
-            <li>Streams: audio ${escapeHtml(plan.audio_policy)}, subtitles ${escapeHtml(plan.subtitle_policy)}, chapters ${escapeHtml(plan.chapter_policy)}</li>
-            <li>Local destination: ${escapeHtml(plan.final_prepared_output_path)}</li>
-          </ul>
-          <p><strong>Review the plan before starting. Preparation is synchronous and may take time.</strong></p>
-          <button id="start-preparation-button" type="button">Start Preparation</button>
-        `;
-        preparationResultBox.classList.remove('hidden');
-        document.getElementById('start-preparation-button').addEventListener('click', executePreparation);
+        byId('analysis-empty').classList.add('hidden');
+        byId('preview-plan-button')?.addEventListener('click', previewPreparationPlan);
       }
 
       async function previewPreparationPlan() {
-        const decision = document.getElementById('preparation-decision')?.value;
-        if (!decision) {
-          preparationResultBox.innerHTML = '<p class="error">Select a preparation decision.</p>';
-          preparationResultBox.classList.remove('hidden');
-          return;
-        }
+        const decision = byId('preparation-decision').value;
+        if (!decision) return;
         if (decision === 'do_not_prepare') {
-          currentPlan = null;
-          preparationResultBox.innerHTML = '<p>Preparation stopped by Product Owner decision. No output was created.</p>';
-          preparationResultBox.classList.remove('hidden');
+          state.plan = null;
+          byId('preparation-result').innerHTML = '<p>Preparation stopped by Product Owner decision. No output was created.</p>';
+          byId('preparation-result').classList.remove('hidden');
           return;
         }
-
-        preparationResultBox.innerHTML = '<p>Building and validating the preparation plan…</p>';
-        preparationResultBox.classList.remove('hidden');
+        byId('preparation-result').innerHTML = '<p>Building the controlled preparation plan…</p>';
+        byId('preparation-result').classList.remove('hidden');
         try {
-          const response = await fetch('/api/media/prepare/plan', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              relative_path: currentAnalysis.relative_source,
-              decision,
-            }),
-          });
-          const payload = await response.json();
-          if (!response.ok) {
-            throw new Error(payload.detail || 'Preparation plan failed.');
-          }
-          renderPlan(payload);
+          state.plan = await api('/api/media/prepare/plan', jsonRequest('POST', {
+            location_id: state.workflow.source_location_id,
+            workflow_id: state.workflow.workflow_id,
+            relative_path: state.workflow.source_relative_path,
+            decision,
+          }));
+          await loadCurrentWorkflow();
+          const target = state.plan.target_prepared_geometry || {};
+          byId('preparation-result').innerHTML = `
+            <h3>Preparation Plan</h3>
+            <ul class="summary-list">
+              <li><strong>Decision</strong><span>${escapeHtml(friendlyState(state.plan.selected_preparation_decision))}</span></li>
+              <li><strong>Prepared geometry</strong><span>${escapeHtml(target.width)}x${escapeHtml(target.height)}, square pixels</span></li>
+              <li><strong>Video</strong><span>H.264 NVENC, ${escapeHtml(state.plan.pixel_format)}</span></li>
+              <li><strong>Streams</strong><span>Audio, subtitles, and chapters preserved</span></li>
+              <li><strong>Storage</strong><span>Server-local NVMe only</span></li>
+            </ul>
+            <p><strong>Review this plan before execution.</strong></p>
+            ${state.plan.ready_to_prepare
+              ? '<button id="start-preparation-button" type="button">Prepare DVD</button>'
+              : '<p>This authoritative preparation has already started; a second execution is not offered.</p>'}
+            <details>
+              <summary>Advanced Details</summary>
+              <pre>${escapeHtml(JSON.stringify(state.plan, null, 2))}</pre>
+            </details>
+          `;
+          byId('start-preparation-button')?.addEventListener('click', executePreparation);
         } catch (error) {
-          preparationResultBox.innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
+          byId('preparation-result').innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
         }
       }
 
       async function executePreparation() {
-        if (!currentPlan?.preparation_id) {
-          preparationResultBox.innerHTML = '<p class="error">Preview a valid plan before preparation.</p>';
-          return;
-        }
-        preparationResultBox.innerHTML = '<p>Preparing… Keep this page open while FFmpeg runs.</p>';
+        if (!state.plan?.preparation_id) return;
+        const started = Date.now();
+        byId('preparation-result').innerHTML = '<h3>Preparing DVD…</h3><p>Elapsed: <span id="preparation-elapsed">00:00:00</span></p><p>No completion percentage is estimated.</p>';
+        const timer = window.setInterval(() => {
+          const seconds = Math.floor((Date.now() - started) / 1000);
+          const date = new Date(seconds * 1000).toISOString().slice(11, 19);
+          if (byId('preparation-elapsed')) byId('preparation-elapsed').textContent = date;
+        }, 1000);
         try {
-          const response = await fetch('/api/media/prepare', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ preparation_id: currentPlan.preparation_id }),
-          });
-          const payload = await response.json();
-          if (!response.ok) {
-            throw new Error(payload.detail || 'Preparation failed.');
-          }
-          const validation = payload.validation || {};
-          preparationResultBox.innerHTML = `
-            <h2>Preparation Result</h2>
-            <ul>
-              <li>Result: ${escapeHtml(payload.status)}</li>
-              <li>Validation: ${escapeHtml(validation.outcome)}</li>
-              <li>Prepared geometry: ${escapeHtml(payload.prepared_geometry?.width)}x${escapeHtml(payload.prepared_geometry?.height)}</li>
-              <li>Encoder: ${escapeHtml(payload.video_encoder)}</li>
-              <li>Frame rate: ${escapeHtml(payload.frame_rate)}</li>
-              <li>Local artifact: ${escapeHtml(payload.prepared_artifact || payload.partial_artifact)}</li>
-            </ul>
-            <p>${escapeHtml((validation.reasons || [payload.reason]).filter(Boolean).join(' '))}</p>
-            ${payload.status === 'completed' ? '<button id="create-rve-job-button" type="button">Create RVE Job</button>' : ''}
+          const result = await api('/api/media/prepare', jsonRequest('POST', {
+            preparation_id: state.plan.preparation_id,
+          }));
+          window.clearInterval(timer);
+          await loadPreparations();
+          await loadCurrentWorkflow();
+          byId('preparation-result').innerHTML = `
+            <div class="result-banner ${result.status === 'completed' ? 'success' : 'warning'}">
+              <strong>${result.status === 'completed' ? 'Preparation Complete' : 'Preparation did not complete'}</strong>
+              <span>Validation: ${escapeHtml(result.validation?.outcome)}</span>
+            </div>
+            <p>${escapeHtml((result.validation?.reasons || [result.reason]).filter(Boolean).join(' '))}</p>
           `;
-          const createButton = document.getElementById('create-rve-job-button');
-          if (createButton) {
-            createButton.addEventListener('click', () => createRveJob());
-          }
+          if (result.status === 'completed') updateStages('enhance');
         } catch (error) {
-          preparationResultBox.innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
+          window.clearInterval(timer);
+          byId('preparation-result').innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
         }
       }
 
-      function renderRveJob(job) {
-          currentRveJob = job;
-          const profile = job.profile || {};
-          const active = ['running', 'cancel_requested'].includes(job.state);
-          const canStart = job.state === 'created';
-          const progress = job.progress_percent == null ? 'Not available' : `${job.progress_percent}%`;
-          rveResultBox.innerHTML = `
-            <h2>RVE Enhancement Job</h2>
-            <ul>
-              <li>Job ID: ${escapeHtml(job.job_id)}</li>
-              <li>Profile: ${escapeHtml(profile.name)}</li>
-              <li>Backend: ${escapeHtml(profile.backend)}</li>
-              <li>Model: ${escapeHtml(profile.model_family)}</li>
-              <li>Scale: ${escapeHtml(profile.scale)}x</li>
-              <li>Interpolation: ${profile.interpolation ? 'ON' : 'OFF'}</li>
-              <li>Decompression: ${profile.decompression ? 'ON' : 'OFF'}</li>
-              <li>Denoise: ${profile.denoise ? 'ON' : 'OFF'}</li>
-              <li>State: ${escapeHtml(job.state)}</li>
-              <li>Started: ${escapeHtml(job.started_at)}</li>
-              <li>Progress: ${escapeHtml(progress)}</li>
-              <li>Status: ${escapeHtml(job.progress_message)}</li>
-              <li>Validation: ${escapeHtml(job.output_validation_status)}</li>
-              <li>Local artifact: ${escapeHtml(job.local_artifact_identity)}</li>
+      async function loadPreparations() {
+        const payload = await api('/api/rve/preparations');
+        state.preparations = payload.preparations;
+        byId('rve-preparation-select').innerHTML = state.preparations
+          .filter((preparation) => preparation.available_for_rve)
+          .map((preparation) => `
+            <option value="${escapeHtml(preparation.preparation_id)}">
+              ${escapeHtml(preparation.source_relative_path)} — validation PASS
+            </option>
+          `).join('');
+      }
+
+      async function createRveJob(preparationId = state.workflow?.preparation_id || state.plan?.preparation_id) {
+        if (!preparationId) {
+          byId('rve-result').innerHTML = '<p class="error">A validator-PASS preparation is required.</p>';
+          byId('rve-result').classList.remove('hidden');
+          return;
+        }
+        try {
+          state.job = await api('/api/rve/jobs', jsonRequest('POST', { preparation_id: preparationId }));
+          await loadCurrentWorkflow();
+          byId('create-rve-job-button').classList.add('hidden');
+          renderRveJob();
+          await loadRecentJobs();
+        } catch (error) {
+          byId('rve-result').innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
+          byId('rve-result').classList.remove('hidden');
+        }
+      }
+
+      function renderRveJob() {
+        const job = state.job;
+        if (!job) return;
+        const active = ['running', 'cancel_requested'].includes(job.state);
+        const canStart = job.state === 'created';
+        const terminal = ['completed', 'failed', 'cancelled', 'interrupted'].includes(job.state);
+        byId('rve-result').innerHTML = `
+          <div class="job-status">
+            <h3>${job.state === 'completed' ? 'Enhancement Complete' : 'RVE Enhancement'}</h3>
+            <div class="progress-track"><div class="progress-bar" style="width:${Number(job.progress_percent || 0)}%"></div></div>
+            <ul class="summary-list">
+              <li><strong>State</strong><span>${escapeHtml(friendlyState(job.state))}</span></li>
+              <li><strong>Progress</strong><span>${job.progress_percent == null ? 'Not yet available' : `${escapeHtml(job.progress_percent)}%`}</span></li>
+              <li><strong>FPS</strong><span>${escapeHtml(job.progress_fps)}</span></li>
+              <li><strong>ETA</strong><span>${escapeHtml(job.progress_eta)}</span></li>
+              <li><strong>Elapsed</strong><span>${escapeHtml(elapsedSince(job.started_at, job.finished_at))}</span></li>
+              <li><strong>Validation</strong><span>${escapeHtml(job.output_validation_status)}</span></li>
             </ul>
+            <p>${escapeHtml(job.progress_message)}</p>
             ${job.failure_reason ? `<p class="error">${escapeHtml(job.failure_reason)}</p>` : ''}
             ${job.cancellation_reason ? `<p>${escapeHtml(job.cancellation_reason)}</p>` : ''}
-            ${canStart ? '<p><strong>Review the locked profile before explicitly starting enhancement.</strong></p><button id="start-rve-job-button" type="button">Start Enhancement</button>' : ''}
-            ${active && job.state === 'running' ? '<button id="cancel-rve-job-button" type="button">Cancel Enhancement</button>' : ''}
-          `;
-          rveResultBox.classList.remove('hidden');
-          document.getElementById('start-rve-job-button')?.addEventListener('click', startRveJob);
-          document.getElementById('cancel-rve-job-button')?.addEventListener('click', cancelRveJob);
-          if (active && !rvePollTimer) {
-            rvePollTimer = window.setInterval(refreshRveJob, 2000);
-          } else if (!active && rvePollTimer) {
-            window.clearInterval(rvePollTimer);
-            rvePollTimer = null;
-          }
+            ${canStart ? '<p><strong>Review the approved profile before explicitly starting.</strong></p><button id="start-rve-job-button" type="button">Start Enhancement</button>' : ''}
+            ${job.state === 'running' ? '<button id="cancel-rve-job-button" class="danger" type="button">Cancel Enhancement</button>' : ''}
+            <details>
+              <summary>Advanced Details</summary>
+              <pre>${escapeHtml(JSON.stringify(job, null, 2))}</pre>
+            </details>
+          </div>
+        `;
+        byId('rve-result').classList.remove('hidden');
+        byId('start-rve-job-button')?.addEventListener('click', startRveJob);
+        byId('cancel-rve-job-button')?.addEventListener('click', cancelRveJob);
+        if (active && !state.rvePollTimer) {
+          state.rvePollTimer = window.setInterval(refreshRveJob, 2000);
+        } else if (terminal && state.rvePollTimer) {
+          window.clearInterval(state.rvePollTimer);
+          state.rvePollTimer = null;
         }
-
-      async function rveRequest(url, options = {}) {
-          const response = await fetch(url, options);
-          const payload = await response.json();
-          if (!response.ok) {
-            throw new Error(payload.detail || 'RVE job request failed.');
-          }
-          return payload;
-        }
-
-      async function createRveJob(preparationId = currentPlan?.preparation_id) {
-          if (!preparationId) {
-            rveResultBox.innerHTML = '<p class="error">A completed server-owned preparation is required.</p>';
-            rveResultBox.classList.remove('hidden');
-            return;
-          }
-          try {
-            const job = await rveRequest('/api/rve/jobs', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ preparation_id: preparationId }),
-            });
-            renderRveJob(job);
-          } catch (error) {
-            rveResultBox.innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
-            rveResultBox.classList.remove('hidden');
-          }
-        }
+        if (job.state === 'completed') renderCompletion(job);
+      }
 
       async function startRveJob() {
-          try {
-            renderRveJob(await rveRequest(`/api/rve/jobs/${currentRveJob.job_id}/start`, { method: 'POST' }));
-          } catch (error) {
-            rveResultBox.innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
-          }
+        try {
+          state.job = await api(`/api/rve/jobs/${state.job.job_id}/start`, { method: 'POST' });
+          renderRveJob();
+          updateStages('enhance');
+        } catch (error) {
+          byId('rve-result').innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
         }
+      }
 
       async function refreshRveJob() {
-          if (!currentRveJob?.job_id) return;
-          try {
-            renderRveJob(await rveRequest(`/api/rve/jobs/${currentRveJob.job_id}`));
-          } catch (error) {
-            if (rvePollTimer) window.clearInterval(rvePollTimer);
-            rvePollTimer = null;
-            rveResultBox.innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
+        if (!state.job?.job_id) return;
+        try {
+          state.job = await api(`/api/rve/jobs/${state.job.job_id}`);
+          renderRveJob();
+          if (['completed', 'failed', 'cancelled', 'interrupted'].includes(state.job.state)) {
+            await loadRecentJobs();
           }
+        } catch (error) {
+          window.clearInterval(state.rvePollTimer);
+          state.rvePollTimer = null;
+          byId('rve-result').innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
         }
+      }
 
       async function cancelRveJob() {
-          try {
-            renderRveJob(await rveRequest(`/api/rve/jobs/${currentRveJob.job_id}/cancel`, { method: 'POST' }));
-          } catch (error) {
-            rveResultBox.innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
-          }
-        }
-      async function loadCandidates() {
-        const response = await fetch('/api/media/discover');
-        const payload = await response.json();
-        if (!Array.isArray(payload.candidates)) {
-          throw new Error('Discovery response was not valid.');
-        }
-        renderCandidateOptions(payload.candidates);
-      }
-
-      async function loadValidatedPreparations() {
-        const payload = await rveRequest('/api/rve/preparations');
-        rvePreparationSelect.innerHTML = '';
-        (payload.preparations || [])
-          .filter((preparation) => preparation.available_for_rve)
-          .forEach((preparation) => {
-            const option = document.createElement('option');
-            option.value = preparation.preparation_id;
-            const geometry = preparation.prepared_geometry || {};
-            option.textContent = `${preparation.source_relative_path || preparation.preparation_id} | ${geometry.width || '—'}x${geometry.height || '—'}`;
-            rvePreparationSelect.appendChild(option);
-          });
-      }
-
-      analyzeButton.addEventListener('click', async () => {
-        const relativePath = candidateSelect.value;
-        if (!relativePath) {
-          resultBox.innerHTML = '<p>No candidate selected.</p>';
-          resultBox.classList.remove('hidden');
-          return;
-        }
-
-        resultBox.innerHTML = '<p>Analyzing selected media…</p>';
-        resultBox.classList.remove('hidden');
-
         try {
-          const response = await fetch('/api/media/analyze', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ relative_path: relativePath }),
-          });
-
-          const payload = await response.json();
-          if (!response.ok) {
-            throw new Error(payload.detail || 'Analysis failed.');
-          }
-          renderSummary(payload);
+          state.job = await api(`/api/rve/jobs/${state.job.job_id}/cancel`, { method: 'POST' });
+          renderRveJob();
         } catch (error) {
-          resultBox.innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
-          resultBox.classList.remove('hidden');
+          byId('rve-result').innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
         }
-      });
+      }
 
-      loadCandidates().catch((error) => {
-        resultBox.innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
-        resultBox.classList.remove('hidden');
-      });
-      loadValidatedPreparations().catch((error) => {
-        rveResultBox.innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
-        rveResultBox.classList.remove('hidden');
-      });
-      document.getElementById('create-existing-rve-job-button').addEventListener('click', () => {
-        createRveJob(rvePreparationSelect.value);
-      });
+      function renderCompletion(job) {
+        const validation = job.output_validation || {};
+        const video = validation.probe?.video_stream || {};
+        const destination = state.workflow?.destination_location_name
+          ? state.workflow.destination_location_name
+          : 'Not selected for this historical job';
+        byId('completion-result').innerHTML = `
+          <div class="result-banner success">
+            <strong>Enhancement Complete</strong>
+            <span>Validation Passed</span>
+            <span>Ready for Publication</span>
+          </div>
+          <ul class="summary-list">
+            <li><strong>Enhanced geometry</strong><span>${escapeHtml(video.width)}x${escapeHtml(video.height)}</span></li>
+            <li><strong>Frame rate</strong><span>${escapeHtml(video.avg_frame_rate || video.r_frame_rate)}</span></li>
+            <li><strong>Duration validation</strong><span>${escapeHtml(job.output_validation_status)}</span></li>
+            <li><strong>Intended destination</strong><span>${escapeHtml(destination)}</span></li>
+            <li><strong>Publication</strong><span>Not yet performed</span></li>
+          </ul>
+        `;
+        updateStages('complete');
+      }
+
+      function metric(value, suffix = '') {
+        return value == null ? 'Unavailable' : `${Number(value).toFixed(1)}${suffix}`;
+      }
+
+      async function loadTelemetry() {
+        try {
+          const telemetry = await api('/api/system/telemetry');
+          byId('telemetry-panel').innerHTML = `
+            <div class="telemetry-grid">
+              <div>
+                <h3>CPU</h3>
+                <p>Utilization: <strong>${metric(telemetry.cpu.utilization_percent, '%')}</strong></p>
+                <p>Temperature: <strong>${metric(telemetry.cpu.temperature_c, '°C')}</strong></p>
+              </div>
+              <div>
+                <h3>GPU</h3>
+                <p>Utilization: <strong>${metric(telemetry.gpu.utilization_percent, '%')}</strong></p>
+                <p>Temperature: <strong>${metric(telemetry.gpu.temperature_c, '°C')}</strong></p>
+                <p>VRAM: <strong>${metric(telemetry.gpu.memory_used_mib, ' MiB')} / ${metric(telemetry.gpu.memory_total_mib, ' MiB')}</strong></p>
+                <p>Power: <strong>${metric(telemetry.gpu.power_draw_w, ' W')} / ${metric(telemetry.gpu.power_limit_w, ' W')}</strong></p>
+                <p>Fan: <strong>${metric(telemetry.gpu.fan_percent, '%')}</strong></p>
+              </div>
+            </div>
+          `;
+        } catch (error) {
+          byId('telemetry-panel').innerHTML = `<p>Telemetry unavailable. Media work is unaffected.</p>`;
+        }
+      }
+
+      async function loadRecentJobs() {
+        try {
+          const payload = await api('/api/rve/jobs?limit=10');
+          byId('recent-jobs').innerHTML = payload.jobs.map((job) => `
+            <article class="history-item">
+              <strong>${escapeHtml(job.movie_name)}</strong>
+              <span>${escapeHtml(friendlyState(job.state))} · ${escapeHtml(job.profile.name)}</span>
+              <span>Created: ${escapeHtml(formatTimestamp(job.created_at))}</span>
+              <span>Validation: ${escapeHtml(job.output_validation_status)}</span>
+            </article>
+          `).join('') || '<p>No durable RVE jobs yet.</p>';
+          if (!state.job && state.workflow?.rve_job_id) {
+            state.job = await api(`/api/rve/jobs/${state.workflow.rve_job_id}`);
+            renderRveJob();
+          }
+        } catch (error) {
+          byId('recent-jobs').innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
+        }
+      }
+
+      async function initialize() {
+        try {
+          await loadCurrentWorkflow();
+          await loadLocations();
+          await discoverSources();
+          await loadPreparations();
+          await loadRecentJobs();
+          const currentPreparation = state.preparations.find(
+            (preparation) => preparation.preparation_id === state.workflow?.preparation_id,
+          );
+          if (state.workflow?.rve_job_id) updateStages('enhance');
+          else if (currentPreparation?.available_for_rve) updateStages('enhance');
+          else if (currentPreparation?.ready_to_prepare) {
+            state.plan = currentPreparation;
+            byId('preparation-result').innerHTML = `
+              <div class="result-banner success">
+                <strong>Preparation plan ready</strong>
+                <span>Review the analysis decision and prepare when ready.</span>
+              </div>
+              <button id="start-preparation-button" type="button">Prepare DVD</button>
+            `;
+            byId('start-preparation-button').addEventListener('click', executePreparation);
+            byId('preparation-result').classList.remove('hidden');
+            updateStages('prepare');
+          }
+          else if (state.workflow?.preparation_id) {
+            byId('preparation-result').innerHTML = `
+              <div class="result-banner warning">
+                <strong>Preparation requires attention</strong>
+                <span>${escapeHtml(currentPreparation?.reason || 'The preparation is not validator-PASS.')}</span>
+              </div>
+            `;
+            byId('preparation-result').classList.remove('hidden');
+            updateStages('prepare');
+          }
+          else if (state.workflow?.destination_location_id) updateStages('prepare');
+          else if (state.workflow) updateStages('destination');
+        } catch (error) {
+          byId('candidate-summary').innerHTML = `<span class="error">${escapeHtml(error.message)}</span>`;
+        }
+        await loadTelemetry();
+      }
+
+      byId('settings-button').addEventListener('click', () => byId('settings-panel').classList.remove('hidden'));
+      byId('close-settings-button').addEventListener('click', () => byId('settings-panel').classList.add('hidden'));
+      byId('add-location-form').addEventListener('submit', addLocation);
+      byId('search-button').addEventListener('click', filterSources);
+      byId('refresh-sources-button').addEventListener('click', discoverSources);
+      byId('source-search').addEventListener('input', filterSources);
+      byId('candidate-select').addEventListener('change', renderCandidateSummary);
+      byId('select-source-button').addEventListener('click', selectSource);
+      byId('save-destination-button').addEventListener('click', saveDestination);
+      byId('analyze-button').addEventListener('click', analyzeDvd);
+      byId('create-rve-job-button').addEventListener('click', () => createRveJob());
+      byId('create-existing-rve-job-button').addEventListener('click', () => createRveJob(byId('rve-preparation-select').value));
+
+      window.setInterval(loadTelemetry, 3000);
+      window.setInterval(() => {
+        if (state.job && ['running', 'cancel_requested'].includes(state.job.state)) renderRveJob();
+      }, 1000);
+      initialize();
     </script>
   </body>
 </html>

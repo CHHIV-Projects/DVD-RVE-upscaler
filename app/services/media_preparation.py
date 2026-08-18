@@ -248,6 +248,10 @@ def create_preparation_plan(
     decision: str,
     *,
     analysis: dict[str, Any] | None = None,
+    preparation_id: str | None = None,
+    workflow_id: str | None = None,
+    source_location_id: str | None = None,
+    destination_location_id: str | None = None,
     root: str | Path | None = None,
     work_root: str | Path | None = None,
     verify_runtime: bool = True,
@@ -261,7 +265,11 @@ def create_preparation_plan(
         raise ValueError(eligibility["reason"])
 
     source_path = validate_candidate_relative_path(relative_path, root=root)
-    analysis_result = analysis if analysis is not None else analyze_candidate(relative_path)
+    analysis_result = (
+        analysis
+        if analysis is not None
+        else analyze_candidate(relative_path, root=root)
+    )
     if analysis_result.get("status") != "ok":
         raise ValueError("Source analysis is not usable for preparation.")
 
@@ -283,7 +291,9 @@ def create_preparation_plan(
     if not space["sufficient"]:
         raise ValueError("Insufficient local free space for the preparation artifact.")
 
-    preparation_id = uuid.uuid4().hex
+    preparation_id = preparation_id or uuid.uuid4().hex
+    if not PREPARATION_ID_PATTERN.fullmatch(preparation_id):
+        raise ValueError("Invalid preparation identifier.")
     preparation_directory = resolved_work_root / preparation_id
     resolved_work_root.mkdir(mode=0o700, parents=True, exist_ok=True)
     preparation_directory.mkdir(mode=0o700, exist_ok=False)
@@ -293,6 +303,10 @@ def create_preparation_plan(
     plan_path = preparation_directory / "plan.json"
     plan = {
         "preparation_id": preparation_id,
+        "workflow_id": workflow_id,
+        "source_location_id": source_location_id,
+        "destination_location_id": destination_location_id,
+        "source_root": str(Path(root or settings.dvd_source_root).expanduser().resolve()),
         "source_relative_path": relative_path,
         "source_absolute_path": str(source_path),
         "source_size_bytes": source_stat.st_size,
@@ -351,11 +365,40 @@ def create_preparation_plan(
 def public_preparation_plan(plan: dict[str, Any]) -> dict[str, Any]:
     internal_fields = {
         "source_absolute_path",
+        "source_root",
         "source_mtime_ns",
         "ffmpeg_arguments",
         "temporary_output_path",
     }
-    return {key: value for key, value in plan.items() if key not in internal_fields}
+    public = {key: value for key, value in plan.items() if key not in internal_fields}
+    public.update(preparation_execution_state(plan))
+    return public
+
+
+def preparation_execution_state(plan: dict[str, Any]) -> dict[str, Any]:
+    temporary_value = plan.get("temporary_output_path")
+    final_value = plan.get("final_prepared_output_path")
+    directory = Path(
+        plan.get("working_directory")
+        or (Path(final_value).parent if final_value else Path(temporary_value).parent)
+    )
+    final_output = Path(final_value or directory / "prepared.mkv")
+    partial_output = Path(
+        temporary_value or directory / "prepared.partial.mkv"
+    )
+    execution_started = (directory / "execution.started").is_file()
+    if final_output.is_file():
+        status = "completed"
+    elif execution_started:
+        status = "output_missing"
+    elif partial_output.exists():
+        status = "unexpected_partial_output"
+    else:
+        status = "plan_ready"
+    return {
+        "preparation_status": status,
+        "ready_to_prepare": status == "plan_ready",
+    }
 
 
 def _validated_preparation_directory(preparation_id: str, work_root: Path) -> Path:
@@ -543,6 +586,7 @@ def execute_preparation(
 ) -> dict[str, Any]:
     resolved_work_root = _resolve_work_root(work_root)
     plan = load_preparation_plan(preparation_id, work_root=resolved_work_root)
+    source_root = plan.get("source_root") or settings.dvd_source_root
     decision = str(plan.get("selected_preparation_decision"))
     target = plan.get("target_prepared_geometry", {})
     expected_filter = build_video_filter(
@@ -557,6 +601,7 @@ def execute_preparation(
 
     eligibility = assess_preparation_eligibility(
         plan["source_relative_path"],
+        root=source_root,
         verify_read_only_mount=verify_runtime,
     )
     if not eligibility["eligible"]:
@@ -564,7 +609,10 @@ def execute_preparation(
     if verify_runtime and not work_root_is_local(resolved_work_root):
         raise ValueError("Preparation work root is not verified server-local storage.")
 
-    source_path = validate_candidate_relative_path(plan["source_relative_path"])
+    source_path = validate_candidate_relative_path(
+        plan["source_relative_path"],
+        root=source_root,
+    )
     source_stat = source_path.stat()
     if (
         source_stat.st_size != plan.get("source_size_bytes")
