@@ -12,7 +12,7 @@
         <div>
           <p class="eyebrow">DVD enhancement workflow</p>
           <h1>DVD RVE Upscaler</h1>
-          <p class="muted">Find an original DVD, choose its intended destination, prepare it, and enhance it.</p>
+          <p class="muted">Find an original DVD, prepare and enhance it, then explicitly finalize and publish it.</p>
         </div>
         <button id="settings-button" class="secondary" type="button">Library Locations</button>
       </header>
@@ -22,14 +22,15 @@
         <li id="stage-destination">2. Destination</li>
         <li id="stage-prepare">3. Analyze &amp; Prepare</li>
         <li id="stage-enhance">4. Enhance</li>
-        <li id="stage-complete">5. Complete</li>
+        <li id="stage-finalize">5. Finalize &amp; Publish</li>
+        <li id="stage-complete">6. Complete</li>
       </ol>
 
       <section id="settings-panel" class="panel hidden" aria-live="polite">
         <div class="section-heading">
           <div>
             <h2>Library Locations</h2>
-            <p class="muted">Locations are configuration only. This application does not write to the NAS.</p>
+            <p class="muted">Locations are configuration only. NAS publication is a separate explicit Product Owner action.</p>
           </div>
           <button id="close-settings-button" class="secondary" type="button">Close</button>
         </div>
@@ -84,7 +85,7 @@
         <div class="step-number">2</div>
         <div class="step-content">
           <h2>Destination</h2>
-          <p class="muted">Choose the approved finished movie destination. Files remain staged in the selected destination root and no publication occurs in this milestone.</p>
+          <p class="muted">Choose the approved finished movie destination. Publication is never automatic.</p>
           <label for="destination-select">Finished Movie Destination</label>
           <select id="destination-select"></select>
           <button id="save-destination-button" type="button">Save Intended Destination</button>
@@ -126,12 +127,22 @@
         </div>
       </section>
 
-      <section class="panel workflow-card" id="completion-panel">
+      <section class="panel workflow-card" id="finalization-panel">
         <div class="step-number">5</div>
+        <div class="step-content">
+          <h2>Finalize &amp; Publish</h2>
+          <div id="finalization-result">
+            <p class="muted">Validated enhancement results will become Ready for Publication only after local finalization passes.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel workflow-card" id="completion-panel">
+        <div class="step-number">6</div>
         <div class="step-content">
           <h2>Completion</h2>
           <div id="completion-result">
-            <p class="muted">Validated enhancement results will appear here.</p>
+            <p class="muted">Publication has not been performed.</p>
           </div>
         </div>
       </section>
@@ -158,7 +169,10 @@
         plan: null,
         preparations: [],
         job: null,
+        finalization: null,
+        finalizationPreview: null,
         rvePollTimer: null,
+        operationTimer: null,
       };
 
       const byId = (id) => document.getElementById(id);
@@ -206,7 +220,7 @@
       }
 
       function updateStages(active) {
-        const stages = ['find', 'destination', 'prepare', 'enhance', 'complete'];
+        const stages = ['find', 'destination', 'prepare', 'enhance', 'finalize', 'complete'];
         const activeIndex = stages.indexOf(active);
         stages.forEach((stage, index) => {
           const element = byId(`stage-${stage}`);
@@ -377,6 +391,8 @@
           state.analysis = null;
           state.plan = null;
           state.job = null;
+          state.finalization = null;
+          state.finalizationPreview = null;
           byId('destination-message').textContent = `Selected ${candidate.filename} from ${candidate.location_name}.`;
           renderAnalysisGuidance();
           updateStages('destination');
@@ -620,7 +636,7 @@
           window.clearInterval(state.rvePollTimer);
           state.rvePollTimer = null;
         }
-        if (job.state === 'completed') renderCompletion(job);
+        if (job.state === 'completed') renderFinalizationEntry(job);
       }
 
       async function startRveJob() {
@@ -641,6 +657,7 @@
           if (['completed', 'failed', 'cancelled', 'interrupted'].includes(state.job.state)) {
             await loadRecentJobs();
           }
+          if (state.job.state === 'completed') await loadFinalization();
         } catch (error) {
           window.clearInterval(state.rvePollTimer);
           state.rvePollTimer = null;
@@ -657,17 +674,17 @@
         }
       }
 
-      function renderCompletion(job) {
+      function renderFinalizationEntry(job) {
         const validation = job.output_validation || {};
         const video = validation.probe?.video_stream || {};
         const destination = state.workflow?.destination_location_name
           ? state.workflow.destination_location_name
           : 'Not selected for this historical job';
-        byId('completion-result').innerHTML = `
+        byId('finalization-result').innerHTML = `
           <div class="result-banner success">
             <strong>Enhancement Complete</strong>
             <span>Validation Passed</span>
-            <span>Ready for Publication</span>
+            <span>Ready for Finalization</span>
           </div>
           <ul class="summary-list">
             <li><strong>Enhanced geometry</strong><span>${escapeHtml(video.width)}x${escapeHtml(video.height)}</span></li>
@@ -675,6 +692,158 @@
             <li><strong>Duration validation</strong><span>${escapeHtml(job.output_validation_status)}</span></li>
             <li><strong>Intended destination</strong><span>${escapeHtml(destination)}</span></li>
             <li><strong>Publication</strong><span>Not yet performed</span></li>
+          </ul>
+          <p>Loading authoritative finalization readiness…</p>
+        `;
+        updateStages('finalize');
+      }
+
+      function generatedFilenameForTitle(title) {
+        return `${String(title || '').trim()} - DVD RVE Nomos8k Medium 2x.mkv`;
+      }
+
+      function showOperation(message) {
+        if (state.operationTimer) window.clearInterval(state.operationTimer);
+        const started = Date.now();
+        byId('finalization-result').innerHTML = `<h3>${escapeHtml(message)}</h3><p>Elapsed: <span id="finalization-elapsed">00:00:00</span></p><p>No completion percentage is estimated.</p>`;
+        state.operationTimer = window.setInterval(() => {
+          const seconds = Math.floor((Date.now() - started) / 1000);
+          if (byId('finalization-elapsed')) {
+            byId('finalization-elapsed').textContent = new Date(seconds * 1000).toISOString().slice(11, 19);
+          }
+        }, 1000);
+      }
+
+      function stopOperation() {
+        if (state.operationTimer) window.clearInterval(state.operationTimer);
+        state.operationTimer = null;
+      }
+
+      function renderFinalization() {
+        const preview = state.finalizationPreview || {};
+        const record = state.finalization;
+        if (!record) {
+          const suggestion = preview.movie_title_suggestion || '';
+          byId('finalization-result').innerHTML = `
+            <h3>Review Final Movie</h3>
+            <label for="movie-title">Movie title</label>
+            <input id="movie-title" maxlength="180" value="${escapeHtml(suggestion)}" />
+            <p><strong>Generated filename:</strong> <span id="generated-filename">${escapeHtml(preview.generated_filename)}</span></p>
+            <p><strong>Destination:</strong> ${escapeHtml(preview.destination_location_name)}</p>
+            <p><strong>Publication:</strong> ${preview.publication?.available
+              ? 'Narrow publication mount is available.'
+              : `Unavailable — ${escapeHtml(preview.publication?.reason)}`}</p>
+            <p><strong>Product Owner action is required.</strong> Creating this plan does not publish anything.</p>
+            <button id="create-finalization-button" type="button">Create Finalization Plan</button>
+          `;
+          byId('movie-title')?.addEventListener('input', (event) => {
+            byId('generated-filename').textContent = generatedFilenameForTitle(event.target.value);
+          });
+          byId('create-finalization-button')?.addEventListener('click', createFinalization);
+          updateStages('finalize');
+          return;
+        }
+
+        const publication = record.publication || {};
+        const failed = record.state === 'failed';
+        byId('finalization-result').innerHTML = `
+          <div class="result-banner ${failed ? 'warning' : 'success'}">
+            <strong>${record.state === 'published' ? 'Publication Complete' : failed ? 'Finalization or Publication Failed' : friendlyState(record.state)}</strong>
+            <span>Final validation: ${escapeHtml(record.final_validation_status)}</span>
+            <span>Publication: ${record.state === 'published' ? 'Complete' : 'Not completed'}</span>
+          </div>
+          <ul class="summary-list">
+            <li><strong>Movie title</strong><span>${escapeHtml(record.movie_title)}</span></li>
+            <li><strong>Final file</strong><span>${escapeHtml(record.final_filename)}</span></li>
+            <li><strong>Profile</strong><span>${escapeHtml(record.profile_name)}</span></li>
+            <li><strong>Destination</strong><span>${escapeHtml(record.destination_location_name)}</span></li>
+            <li><strong>State</strong><span>${escapeHtml(friendlyState(record.state))}</span></li>
+          </ul>
+          ${record.failure_reason ? `<p class="error">${escapeHtml(record.failure_reason)}</p>` : ''}
+          ${record.state === 'created'
+            ? '<p>Finalization uses stream copy only and creates a validated local final MKV.</p><button id="finalize-button" type="button">Finalize Local MKV</button>'
+            : ''}
+          ${record.state === 'finalized'
+            ? `<p><strong>Local final validation PASS.</strong></p>
+               <p>Publication ${publication.available ? 'is available.' : `unavailable — ${escapeHtml(publication.reason)}`}</p>
+               <p><strong>Publishing requires an explicit Product Owner action and will never overwrite a collision.</strong></p>
+               <button id="publish-button" type="button" ${publication.available && !publication.collision ? '' : 'disabled'}>Publish to ${escapeHtml(record.destination_location_name)}</button>`
+            : ''}
+          <details>
+            <summary>Advanced Details</summary>
+            <pre>${escapeHtml(JSON.stringify(record, null, 2))}</pre>
+          </details>
+        `;
+        byId('finalize-button')?.addEventListener('click', finalizeMovie);
+        byId('publish-button')?.addEventListener('click', publishMovie);
+        if (record.state === 'published') renderPublishedCompletion(record);
+        else updateStages('finalize');
+      }
+
+      async function loadFinalization() {
+        if (!state.workflow?.workflow_id || state.job?.state !== 'completed') return;
+        try {
+          const preview = await api(`/api/workflows/${state.workflow.workflow_id}/finalization`);
+          state.finalizationPreview = preview;
+          state.finalization = preview.finalization;
+          if (state.finalization?.finalization_id) {
+            state.finalization = await api(`/api/finalizations/${state.finalization.finalization_id}`);
+          }
+          renderFinalization();
+        } catch (error) {
+          byId('finalization-result').innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
+        }
+      }
+
+      async function createFinalization() {
+        try {
+          state.finalization = await api(
+            `/api/workflows/${state.workflow.workflow_id}/finalization`,
+            jsonRequest('POST', { movie_title: byId('movie-title').value }),
+          );
+          renderFinalization();
+        } catch (error) {
+          byId('finalization-result').innerHTML += `<p class="error">${escapeHtml(error.message)}</p>`;
+        }
+      }
+
+      async function finalizeMovie() {
+        showOperation('Finalizing local MKV…');
+        try {
+          await api(`/api/finalizations/${state.finalization.finalization_id}/finalize`, { method: 'POST' });
+          stopOperation();
+          state.finalization = await api(`/api/finalizations/${state.finalization.finalization_id}`);
+          renderFinalization();
+        } catch (error) {
+          stopOperation();
+          byId('finalization-result').innerHTML = `<p class="error">${escapeHtml(error.message)}</p><p>The RVE and prepared artifacts remain unchanged.</p>`;
+        }
+      }
+
+      async function publishMovie() {
+        showOperation('Publishing and validating copied MKV…');
+        try {
+          state.finalization = await api(`/api/finalizations/${state.finalization.finalization_id}/publish`, { method: 'POST' });
+          stopOperation();
+          renderFinalization();
+        } catch (error) {
+          stopOperation();
+          byId('finalization-result').innerHTML = `<p class="error">${escapeHtml(error.message)}</p><p>The local validated copy remains safe on the server.</p>`;
+        }
+      }
+
+      function renderPublishedCompletion(record) {
+        byId('completion-result').innerHTML = `
+          <div class="result-banner success">
+            <strong>Movie Complete</strong>
+            <span>Final validation: PASS</span>
+            <span>Publication: Complete</span>
+          </div>
+          <ul class="summary-list">
+            <li><strong>Movie</strong><span>${escapeHtml(record.movie_title)}</span></li>
+            <li><strong>Profile</strong><span>${escapeHtml(record.profile_name)}</span></li>
+            <li><strong>Final file</strong><span>${escapeHtml(record.final_filename)}</span></li>
+            <li><strong>Destination</strong><span>${escapeHtml(record.destination_location_name)}</span></li>
           </ul>
         `;
         updateStages('complete');
@@ -723,6 +892,7 @@
           if (!state.job && state.workflow?.rve_job_id) {
             state.job = await api(`/api/rve/jobs/${state.workflow.rve_job_id}`);
             renderRveJob();
+            if (state.job.state === 'completed') await loadFinalization();
           }
         } catch (error) {
           byId('recent-jobs').innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;

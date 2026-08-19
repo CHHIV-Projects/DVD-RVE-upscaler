@@ -148,6 +148,7 @@ def probe_media(source_path: Path) -> dict[str, Any]:
     video_stream = next((stream for stream in streams if stream.get("codec_type") == "video"), {})
     audio_streams = [stream for stream in streams if stream.get("codec_type") == "audio"]
     subtitle_streams = [stream for stream in streams if stream.get("codec_type") == "subtitle"]
+    attachment_streams = [stream for stream in streams if stream.get("codec_type") == "attachment"]
 
     duration = payload.get("format", {}).get("duration")
     if duration is None:
@@ -179,8 +180,22 @@ def probe_media(source_path: Path) -> dict[str, Any]:
         }
         for stream in subtitle_streams
     ]
+    attachments = [
+        {
+            "index": stream.get("index"),
+            "codec": stream.get("codec_name"),
+            "filename": stream.get("tags", {}).get("filename"),
+            "mimetype": stream.get("tags", {}).get("mimetype"),
+        }
+        for stream in attachment_streams
+    ]
 
-    chapter_count = len(payload.get("chapters", []) or [])
+    chapters = [
+        {
+            "title": chapter.get("tags", {}).get("title"),
+        }
+        for chapter in payload.get("chapters", []) or []
+    ]
 
     return {
         "status": "ok",
@@ -201,7 +216,10 @@ def probe_media(source_path: Path) -> dict[str, Any]:
         },
         "audio_streams": audio,
         "subtitle_streams": subtitles,
-        "chapter_count": chapter_count,
+        "attachment_streams": attachments,
+        "format_tags": payload.get("format", {}).get("tags", {}),
+        "chapter_count": len(chapters),
+        "chapters": chapters,
         "geometry": compute_square_pixel_geometry(video_stream),
     }
 

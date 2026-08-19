@@ -140,6 +140,19 @@ class OperatorStateStore:
                 CREATE UNIQUE INDEX IF NOT EXISTS operator_workflows_rve_job
                     ON operator_workflows (rve_job_id)
                     WHERE rve_job_id IS NOT NULL;
+
+                CREATE TABLE IF NOT EXISTS historical_workflow_adoptions (
+                    workflow_id TEXT PRIMARY KEY,
+                    preparation_id TEXT NOT NULL UNIQUE,
+                    rve_job_id TEXT NOT NULL UNIQUE,
+                    historical_source_absolute_path TEXT NOT NULL,
+                    historical_source_relative_path TEXT NOT NULL,
+                    adopted_source_size_bytes INTEGER NOT NULL,
+                    adopted_source_mtime_ns INTEGER NOT NULL,
+                    authorized_at TEXT NOT NULL,
+                    FOREIGN KEY (workflow_id)
+                        REFERENCES operator_workflows(workflow_id)
+                );
                 """
             )
         os.chmod(self.database_path, 0o600)
@@ -399,6 +412,106 @@ class OperatorStateStore:
                 (job_id, utc_now(), row["workflow_id"]),
             )
         return self.get_workflow(row["workflow_id"])
+
+    def create_historical_workflow_adoption(
+        self,
+        *,
+        source_location_id: str,
+        source_relative_path: str,
+        destination_location_id: str,
+        preparation_id: str,
+        rve_job_id: str,
+        historical_source_absolute_path: str,
+        historical_source_relative_path: str,
+        source_size_bytes: int,
+        source_mtime_ns: int,
+    ) -> dict[str, Any]:
+        source_location = self.get_location(
+            source_location_id,
+            role="ORIGINAL_SOURCE",
+            require_enabled=True,
+        )
+        self.get_location(
+            destination_location_id,
+            role="FINISHED_DESTINATION",
+            require_enabled=True,
+        )
+        source = validate_candidate_relative_path(
+            source_relative_path,
+            root=source_location["server_root"],
+        )
+        relative = source.relative_to(Path(source_location["server_root"])).as_posix()
+        for value, label in (
+            (preparation_id, "preparation"),
+            (rve_job_id, "RVE job"),
+        ):
+            try:
+                if uuid.UUID(str(value)).hex != str(value):
+                    raise ValueError
+            except ValueError as exc:
+                raise ValueError(f"Invalid historical {label} identifier.") from exc
+        if not historical_source_absolute_path or not historical_source_relative_path:
+            raise ValueError("Historical source identity evidence is required.")
+        now = utc_now()
+        workflow_id = uuid.uuid4().hex
+        try:
+            with self._connect() as connection:
+                connection.execute(
+                    """
+                    INSERT INTO operator_workflows (
+                        workflow_id, source_location_id, source_relative_path,
+                        destination_location_id, destination_relative_folder,
+                        preparation_id, rve_job_id, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)
+                    """,
+                    (
+                        workflow_id,
+                        source_location_id,
+                        relative,
+                        destination_location_id,
+                        preparation_id,
+                        rve_job_id,
+                        now,
+                        now,
+                    ),
+                )
+                connection.execute(
+                    """
+                    INSERT INTO historical_workflow_adoptions (
+                        workflow_id, preparation_id, rve_job_id,
+                        historical_source_absolute_path,
+                        historical_source_relative_path,
+                        adopted_source_size_bytes, adopted_source_mtime_ns,
+                        authorized_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        workflow_id,
+                        preparation_id,
+                        rve_job_id,
+                        historical_source_absolute_path,
+                        historical_source_relative_path,
+                        int(source_size_bytes),
+                        int(source_mtime_ns),
+                        now,
+                    ),
+                )
+        except sqlite3.IntegrityError as exc:
+            raise ValueError(
+                "Historical preparation or RVE evidence is already associated."
+            ) from exc
+        return self.get_workflow(workflow_id)
+
+    def get_historical_workflow_adoption(
+        self,
+        workflow_id: str,
+    ) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM historical_workflow_adoptions WHERE workflow_id = ?",
+                (workflow_id,),
+            ).fetchone()
+        return dict(row) if row else None
 
     def find_workflow_by_preparation(self, preparation_id: str) -> dict[str, Any] | None:
         with self._connect() as connection:
