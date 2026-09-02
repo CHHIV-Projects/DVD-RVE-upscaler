@@ -43,7 +43,12 @@ def _find_mount_value(path: Path, column: str) -> str | None:
     if process.returncode != 0:
         return None
     value = (process.stdout or "").strip()
-    return value or None
+    if not value:
+        return None
+    # For stacked mounts (e.g., autofs over CIFS), findmnt returns multiple rows.
+    # Select the last non-empty line to get the actual backing filesystem's value.
+    lines = [line.strip() for line in value.split('\n') if line.strip()]
+    return lines[-1] if lines else None
 
 
 def source_mount_is_read_only(source_path: Path) -> bool:

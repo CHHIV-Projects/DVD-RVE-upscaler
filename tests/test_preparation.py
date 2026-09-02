@@ -459,3 +459,101 @@ def test_plan_and_prepare_api_boundaries(monkeypatch):
     executed = client.post("/api/media/prepare", json={"preparation_id": "a" * 32})
     assert executed.status_code == 200
     assert executed.json()["status"] == "completed"
+
+
+# Mount verification regression tests (handling stacked autofs + actual filesystem)
+class MockFindmntResult:
+    def __init__(self, returncode, stdout):
+        self.returncode = returncode
+        self.stdout = stdout
+
+
+@pytest.mark.parametrize(
+    "stdout,expected_ro",
+    [
+        # a. Single-row read-only mount
+        ("ro,relatime,vers=3.1.1,cache=strict,username=user\n", True),
+        # b. Single-row writable mount
+        ("rw,relatime,fd=64,pgrp=1,timeout=0\n", False),
+        # c. Stacked systemd automount (rw) + read-only backing (cifs/ro)
+        (
+            "rw,relatime,fd=64,pgrp=1,timeout=0,minproto=5,maxproto=5,direct,pipe_ino=25716\n"
+            "ro,relatime,vers=3.1.1,cache=strict,username=user\n",
+            True,
+        ),
+        # d. Stacked systemd automount (rw) + writable backing (cifs/rw)
+        (
+            "rw,relatime,fd=64,pgrp=1,timeout=0,minproto=5,maxproto=5,direct,pipe_ino=25716\n"
+            "rw,relatime,vers=3.1.1,cache=strict,username=user\n",
+            False,
+        ),
+    ],
+)
+def test_source_mount_is_read_only_with_stacked_mounts(monkeypatch, stdout, expected_ro):
+    """Test that read-only detection works correctly for both single and stacked mounts."""
+    def mock_run(*args, **kwargs):
+        return MockFindmntResult(returncode=0, stdout=stdout)
+
+    monkeypatch.setattr(media_preparation.subprocess, "run", mock_run)
+    result = media_preparation.source_mount_is_read_only(Path("/mnt/nas/movies/test.mkv"))
+    assert result == expected_ro
+
+
+@pytest.mark.parametrize(
+    "fstype_stdout,expected_local",
+    [
+        # Single row with local filesystem
+        ("ext4\n", True),
+        # Single row with network filesystem
+        ("cifs\n", False),
+        # Stacked: autofs (local-like) + cifs (network) should return False
+        ("autofs\ncifs\n", False),
+        # Stacked: autofs + nfs should return False
+        ("autofs\nnfs\n", False),
+    ],
+)
+def test_work_root_is_local_with_stacked_mounts(tmp_path, monkeypatch, fstype_stdout, expected_local):
+    """Test that filesystem type detection correctly identifies backing filesystem in stacked mounts."""
+    work_root = tmp_path / "work"
+    work_root.mkdir()
+
+    def mock_run(*args, **kwargs):
+        return MockFindmntResult(returncode=0, stdout=fstype_stdout)
+
+    monkeypatch.setattr(media_preparation.subprocess, "run", mock_run)
+    result = media_preparation.work_root_is_local(work_root)
+    assert result == expected_local
+
+
+def test_find_mount_value_selects_last_row_for_stacked_mounts(monkeypatch):
+    """Test that _find_mount_value correctly selects the last row for stacked mounts."""
+    multiline_output = (
+        "rw,relatime,fd=64,pgrp=1,timeout=0,minproto=5,maxproto=5,direct,pipe_ino=25716\n"
+        "ro,relatime,vers=3.1.1,cache=strict,username=user\n"
+    )
+
+    def mock_run(*args, **kwargs):
+        return MockFindmntResult(returncode=0, stdout=multiline_output)
+
+    monkeypatch.setattr(media_preparation.subprocess, "run", mock_run)
+    result = media_preparation._find_mount_value(Path("/mnt/nas/test.mkv"), "OPTIONS")
+    # Should return the last non-empty line (the actual backing filesystem)
+    assert result == "ro,relatime,vers=3.1.1,cache=strict,username=user"
+
+
+def test_find_mount_value_handles_empty_lines_in_output(monkeypatch):
+    """Test that _find_mount_value correctly skips empty lines."""
+    output_with_empty = (
+        "rw,relatime,fd=64\n"
+        "\n"
+        "ro,relatime,vers=3.1.1\n"
+        "\n"
+    )
+
+    def mock_run(*args, **kwargs):
+        return MockFindmntResult(returncode=0, stdout=output_with_empty)
+
+    monkeypatch.setattr(media_preparation.subprocess, "run", mock_run)
+    result = media_preparation._find_mount_value(Path("/mnt/nas/test.mkv"), "OPTIONS")
+    assert result == "ro,relatime,vers=3.1.1"
+
