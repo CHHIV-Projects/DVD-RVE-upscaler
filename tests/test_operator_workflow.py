@@ -16,6 +16,8 @@ from app.services.operator_state import (
     validate_destination_subfolder,
 )
 from app.services.system_telemetry import (
+    CPU_SENSOR_CHIP,
+    SENSORS_QUERY,
     TelemetryService,
     calculate_cpu_utilization,
     parse_cpu_stat,
@@ -289,6 +291,107 @@ def test_telemetry_endpoint_failure_does_not_affect_job_or_health_api(monkeypatc
     monkeypatch.setattr(app.state, "telemetry_service", PartialTelemetry(), raising=False)
     assert client.get("/api/system/telemetry").status_code == 200
     assert client.get("/health").json() == {"status": "ok"}
+
+
+def test_cpu_sensor_query_targets_known_chip_only():
+    # Regression guard: CPU telemetry must query the specific k10temp chip
+    # instance rather than enumerating all sensors (which also probes the
+    # MT7921 Wi-Fi thermal sensor and can hang in the kernel).
+    assert SENSORS_QUERY == ["sensors", "-j", CPU_SENSOR_CHIP]
+    assert CPU_SENSOR_CHIP == "k10temp-pci-00c3"
+    assert "sensors" in SENSORS_QUERY
+    assert "-j" in SENSORS_QUERY
+    # Must never be the unrestricted two-element form.
+    assert SENSORS_QUERY != ["sensors", "-j"]
+
+
+def test_cpu_temperature_uses_targeted_sensor_command_and_parses_tctl():
+    captured_commands = []
+
+    def runner(command, **kwargs):
+        captured_commands.append(command)
+        if command[0] == "nvidia-smi":
+            raise subprocess.TimeoutExpired(command, 3)
+        payload = {
+            "k10temp-pci-00c3": {
+                "Adapter": "PCI adapter",
+                "Tctl": {"temp1_input": 52.75},
+                "Tccd1": {"temp3_input": 42.5},
+            }
+        }
+        return SimpleNamespace(returncode=0, stdout=json.dumps(payload), stderr="")
+
+    service = TelemetryService(
+        runner=runner, proc_stat_reader=lambda: "cpu  100 0 0 900 0 0 0 0\n"
+    )
+    result = service.snapshot()
+
+    sensors_commands = [cmd for cmd in captured_commands if cmd[0] == "sensors"]
+    assert sensors_commands == [SENSORS_QUERY]
+    assert result["cpu"]["temperature_c"] == 52.75
+
+
+def test_cpu_temperature_handles_malformed_sensor_output_safely():
+    def runner(command, **kwargs):
+        if command[0] == "nvidia-smi":
+            raise subprocess.TimeoutExpired(command, 3)
+        return SimpleNamespace(returncode=0, stdout="not-json", stderr="")
+
+    service = TelemetryService(
+        runner=runner, proc_stat_reader=lambda: "cpu  100 0 0 900 0 0 0 0\n"
+    )
+    result = service.snapshot()
+
+    assert result["cpu"]["temperature_c"] is None
+    assert result["status"] == "partial"
+    assert any("sensors JSON" in reason for reason in result["unavailable_reasons"])
+
+
+def test_cpu_temperature_handles_missing_chip_in_output_safely():
+    def runner(command, **kwargs):
+        if command[0] == "nvidia-smi":
+            raise subprocess.TimeoutExpired(command, 3)
+        # Chip absent from output (e.g. sensor unavailable) but valid JSON.
+        return SimpleNamespace(returncode=0, stdout=json.dumps({}), stderr="")
+
+    service = TelemetryService(
+        runner=runner, proc_stat_reader=lambda: "cpu  100 0 0 900 0 0 0 0\n"
+    )
+    result = service.snapshot()
+
+    assert result["cpu"]["temperature_c"] is None
+    assert result["status"] == "partial"
+
+
+def test_cpu_temperature_handles_subprocess_timeout_safely():
+    def runner(command, **kwargs):
+        if command[0] == "sensors":
+            raise subprocess.TimeoutExpired(command, 3)
+        return SimpleNamespace(returncode=1, stdout="", stderr="missing")
+
+    service = TelemetryService(
+        runner=runner, proc_stat_reader=lambda: "cpu  100 0 0 900 0 0 0 0\n"
+    )
+    # Telemetry subprocess failure must not raise into the caller.
+    result = service.snapshot()
+
+    assert result["cpu"]["temperature_c"] is None
+    assert result["status"] == "partial"
+
+
+def test_cpu_temperature_handles_nonzero_returncode_safely():
+    def runner(command, **kwargs):
+        if command[0] == "nvidia-smi":
+            raise subprocess.TimeoutExpired(command, 3)
+        return SimpleNamespace(returncode=1, stdout="", stderr="No sensors found")
+
+    service = TelemetryService(
+        runner=runner, proc_stat_reader=lambda: "cpu  100 0 0 900 0 0 0 0\n"
+    )
+    result = service.snapshot()
+
+    assert result["cpu"]["temperature_c"] is None
+    assert result["status"] == "partial"
 
 
 def test_operator_page_exposes_one_staged_workflow_and_safe_status():

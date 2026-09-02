@@ -12,6 +12,13 @@ NVIDIA_QUERY = [
     "--format=csv,noheader,nounits",
 ]
 
+# Query the known AMD CPU sensor chip directly rather than enumerating all
+# sensors. Unrestricted `sensors -j` also probes unrelated hardware sensors
+# (e.g. the MT7921 Wi-Fi thermal sensor), which can hang indefinitely in the
+# kernel on affected systems.
+CPU_SENSOR_CHIP = "k10temp-pci-00c3"
+SENSORS_QUERY = ["sensors", "-j", CPU_SENSOR_CHIP]
+
 
 def _number(value: str) -> float | None:
     normalized = value.strip()
@@ -136,7 +143,7 @@ class TelemetryService:
     def _cpu_temperature(self) -> tuple[float | None, str | None]:
         try:
             result = self.runner(
-                ["sensors", "-j"],
+                SENSORS_QUERY,
                 capture_output=True,
                 text=True,
                 check=False,
