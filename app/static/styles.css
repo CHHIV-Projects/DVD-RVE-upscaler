@@ -33,11 +33,21 @@ body {
 }
 
 .app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
   padding: 28px 32px;
   border-radius: 18px;
   color: #f8fafc;
   background: #14213d;
   box-shadow: 0 18px 40px rgb(20 33 61 / 18%);
+}
+
+.app-header .button-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 h1,

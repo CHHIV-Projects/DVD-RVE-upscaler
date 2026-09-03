@@ -14,7 +14,10 @@
           <h1>DVD RVE Upscaler</h1>
           <p class="muted">Find an original DVD, prepare and enhance it, then explicitly finalize and publish it.</p>
         </div>
-        <button id="settings-button" class="secondary" type="button">Library Locations</button>
+        <div class="button-row">
+          <button id="settings-button" class="secondary" type="button">Library Locations</button>
+          <button class="secondary start-new-movie-button" type="button" data-start-new-movie>Start New Movie</button>
+        </div>
       </header>
 
       <ol class="stage-list" aria-label="Workflow stages">
@@ -227,6 +230,39 @@
           element.classList.toggle('active', index === activeIndex);
           element.classList.toggle('done', index < activeIndex);
         });
+      }
+
+      function resetActiveWorkflowState() {
+        if (state.rvePollTimer) {
+          window.clearInterval(state.rvePollTimer);
+          state.rvePollTimer = null;
+        }
+        if (state.operationTimer) {
+          window.clearInterval(state.operationTimer);
+          state.operationTimer = null;
+        }
+        state.workflow = null;
+        state.analysis = null;
+        state.plan = null;
+        state.job = null;
+        state.finalization = null;
+        state.finalizationPreview = null;
+        byId('analysis-result').innerHTML = '';
+        byId('analysis-result').classList.add('hidden');
+        byId('preparation-result').innerHTML = '';
+        byId('preparation-result').classList.add('hidden');
+        byId('rve-result').innerHTML = '';
+        byId('rve-result').classList.add('hidden');
+        byId('finalization-result').innerHTML = '<p class="muted">Validated enhancement results will become Ready for Publication only after local finalization passes.</p>';
+        byId('completion-result').innerHTML = '<p class="muted">Publication has not been performed.</p>';
+        byId('destination-message').textContent = '';
+        byId('destination-message').className = 'message';
+        byId('candidate-summary').textContent = 'Select a DVD result.';
+        byId('source-search').value = '';
+        byId('destination-select').value = '';
+        filterSources();
+        renderAnalysisGuidance();
+        updateStages('find');
       }
 
       function publicLocationCard(location) {
@@ -845,7 +881,11 @@
             <li><strong>Final file</strong><span>${escapeHtml(record.final_filename)}</span></li>
             <li><strong>Destination</strong><span>${escapeHtml(record.destination_location_name)}</span></li>
           </ul>
+          <button class="secondary start-new-movie-button" type="button" data-start-new-movie>Start New Movie</button>
         `;
+        document.querySelectorAll('.start-new-movie-button').forEach((button) => {
+          button.addEventListener('click', resetActiveWorkflowState);
+        });
         updateStages('complete');
       }
 
@@ -944,6 +984,9 @@
 
       byId('settings-button').addEventListener('click', () => byId('settings-panel').classList.remove('hidden'));
       byId('close-settings-button').addEventListener('click', () => byId('settings-panel').classList.add('hidden'));
+      document.querySelectorAll('.start-new-movie-button').forEach((button) => {
+        button.addEventListener('click', resetActiveWorkflowState);
+      });
       byId('add-location-form').addEventListener('submit', addLocation);
       byId('search-button').addEventListener('click', filterSources);
       byId('refresh-sources-button').addEventListener('click', discoverSources);

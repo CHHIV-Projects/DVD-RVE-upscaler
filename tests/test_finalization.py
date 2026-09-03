@@ -622,6 +622,43 @@ def test_publication_root_must_be_exact_distinct_writable_nas_mount(tmp_path, mo
     )["available"]
 
 
+def test_publication_root_uses_backing_cifs_row_after_autofs_activation(tmp_path, monkeypatch):
+    publication = tmp_path / "publication"
+    publication.mkdir()
+    movies = tmp_path / "movies"
+    movies.mkdir()
+    accessed = []
+
+    def access_guard(path, mode):
+        accessed.append((str(path), mode))
+        return True
+
+    monkeypatch.setattr("app.services.finalization.os.access", access_guard)
+    values = {
+        "TARGET": f"{publication}\n{publication}",
+        "SOURCE": "systemd-1\n//nas/Movies/DVD Upscaled",
+        "FSTYPE": "autofs\ncifs",
+        "OPTIONS": "rw,nosuid\nrw,vers=3.0,credentials=dvd-rve-publisher",
+    }
+
+    def runner(command, **kwargs):
+        return SimpleNamespace(returncode=0, stdout=values[command[-1]], stderr="")
+
+    status = publication_root_status(root=publication, movies_root=movies, runner=runner)
+    assert status["available"] is True
+    assert status["filesystem"] == "cifs"
+    assert accessed
+    assert not publication_root_status(
+        root=publication,
+        movies_root=movies,
+        runner=lambda *args, **kwargs: SimpleNamespace(
+            returncode=0,
+            stdout="systemd-1\n",
+            stderr="",
+        ),
+    )["available"]
+
+
 def test_atomic_promotion_never_replaces_existing_file(tmp_path):
     source = tmp_path / "candidate"
     destination = tmp_path / "final"
@@ -667,6 +704,7 @@ def test_browser_exposes_continuous_explicit_finalization_workflow():
         "Finalize Local MKV",
         "Publish to",
         "No completion percentage is estimated",
+        "Start New Movie",
         "/api/finalizations/",
     ):
         assert text in page.text

@@ -423,6 +423,11 @@ def publication_root_status(
         result["reason"] = "Publication root must be distinct from the broad Movies hierarchy."
         return result
 
+    try:
+        os.access(resolved, os.R_OK)
+    except OSError:
+        pass
+
     def findmnt(column: str) -> str | None:
         try:
             process = runner(
@@ -434,8 +439,13 @@ def publication_root_status(
             )
         except (OSError, subprocess.TimeoutExpired):
             return None
+        if process.returncode != 0:
+            return None
         value = (process.stdout or "").strip()
-        return value if process.returncode == 0 and value else None
+        if not value:
+            return None
+        rows = [line.strip() for line in value.splitlines() if line.strip()]
+        return rows[-1] if rows else None
 
     target = findmnt("TARGET")
     source = findmnt("SOURCE")
