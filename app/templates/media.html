@@ -623,7 +623,11 @@
           return;
         }
         try {
-          state.job = await api('/api/rve/jobs', jsonRequest('POST', { preparation_id: preparationId }));
+          const payload = {
+            preparation_id: preparationId,
+            workflow_id: state.workflow?.workflow_id || null,
+          };
+          state.job = await api('/api/rve/jobs', jsonRequest('POST', payload));
           await loadCurrentWorkflow();
           byId('create-rve-job-button').classList.add('hidden');
           renderRveJob();

@@ -392,13 +392,36 @@ class OperatorStateStore:
             )
         return self.get_workflow(workflow_id)
 
+    def recover_preparation_to_workflow(
+        self,
+        workflow_id: str,
+        preparation_id: str,
+    ) -> dict[str, Any]:
+        workflow = self.get_workflow(workflow_id)
+        if workflow["rve_job_id"] is not None:
+            raise ValueError(
+                "This workflow already has an RVE job; duplicate enhancement is not the default action."
+            )
+        if workflow["preparation_id"] not in {None, preparation_id}:
+            raise ValueError("Workflow is already associated with a different preparation.")
+        return self.associate_preparation(workflow_id, preparation_id)
+
     def associate_rve_job(self, preparation_id: str, job_id: str) -> dict[str, Any] | None:
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT workflow_id, rve_job_id FROM operator_workflows "
-                "WHERE preparation_id = ? ORDER BY updated_at DESC LIMIT 1",
+                """
+                SELECT workflow_id, rve_job_id FROM operator_workflows
+                WHERE preparation_id = ? AND rve_job_id IS NULL
+                ORDER BY updated_at DESC, created_at DESC LIMIT 1
+                """,
                 (preparation_id,),
             ).fetchone()
+            if row is None:
+                row = connection.execute(
+                    "SELECT workflow_id, rve_job_id FROM operator_workflows "
+                    "WHERE preparation_id = ? ORDER BY updated_at DESC, created_at DESC LIMIT 1",
+                    (preparation_id,),
+                ).fetchone()
             if row is None:
                 return None
             if row["rve_job_id"] not in {None, job_id}:
@@ -516,10 +539,19 @@ class OperatorStateStore:
     def find_workflow_by_preparation(self, preparation_id: str) -> dict[str, Any] | None:
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT workflow_id FROM operator_workflows "
-                "WHERE preparation_id = ? ORDER BY updated_at DESC LIMIT 1",
+                """
+                SELECT workflow_id FROM operator_workflows
+                WHERE preparation_id = ? AND rve_job_id IS NULL
+                ORDER BY updated_at DESC, created_at DESC LIMIT 1
+                """,
                 (preparation_id,),
             ).fetchone()
+            if row is None:
+                row = connection.execute(
+                    "SELECT workflow_id FROM operator_workflows "
+                    "WHERE preparation_id = ? ORDER BY updated_at DESC, created_at DESC LIMIT 1",
+                    (preparation_id,),
+                ).fetchone()
         return self.get_workflow(row["workflow_id"]) if row else None
 
     def find_workflow_by_job(self, job_id: str) -> dict[str, Any] | None:

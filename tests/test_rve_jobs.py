@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from app.api import rve as rve_api
 from app.config import settings
 from app.main import app
+from app.services.operator_state import OperatorStateStore
 from app.services.rve_jobs import (
     PROFILE_NAME,
     RVEJobManager,
@@ -73,6 +74,11 @@ def job_record(tmp_path, job_id, *, state="created"):
 
 def create_preparation_fixture(tmp_path, monkeypatch):
     work_root = tmp_path / "work"
+    movies_root = tmp_path / "movies"
+    source_root = movies_root / "DVD"
+    source_root.mkdir(parents=True)
+    movie = source_root / "Movie.mkv"
+    movie.write_bytes(b"movie")
     preparation_id = "b" * 32
     preparation_directory = work_root / preparation_id
     preparation_directory.mkdir(parents=True)
@@ -87,6 +93,8 @@ def create_preparation_fixture(tmp_path, monkeypatch):
     }
     (preparation_directory / "plan.json").write_text(json.dumps(plan))
     monkeypatch.setattr(settings, "preparation_work_root", str(work_root), raising=False)
+    monkeypatch.setattr(settings, "trusted_nas_movies_root", str(movies_root), raising=False)
+    monkeypatch.setattr(settings, "dvd_source_root", str(source_root), raising=False)
     return work_root, preparation_id, prepared
 
 
@@ -160,6 +168,49 @@ def test_create_job_accepts_only_validator_pass_preparation(tmp_path, monkeypatc
             "reason": "valid",
         }
     ]
+
+
+def test_recovered_preparation_creates_new_rve_job_without_inheriting_historical_interrupted_job(
+    tmp_path, monkeypatch,
+):
+    work_root, preparation_id, _ = create_preparation_fixture(tmp_path, monkeypatch)
+    database = tmp_path / "state" / "app.sqlite3"
+    operator_store = OperatorStateStore(database)
+    operator_store.initialize()
+    source = operator_store.list_locations(role="ORIGINAL_SOURCE")[0]
+    historical = operator_store.create_workflow(source["location_id"], "Movie.mkv")
+    historical = operator_store.associate_preparation(historical["workflow_id"], preparation_id)
+    historical_job_id = "c" * 32
+    historical = operator_store.associate_rve_job(preparation_id, historical_job_id)
+
+    current = operator_store.create_workflow(source["location_id"], "Movie.mkv")
+    current = operator_store.recover_preparation_to_workflow(current["workflow_id"], preparation_id)
+
+    rve_store = RVEJobStore(tmp_path / "state" / "rve.sqlite3")
+    rve_store.initialize()
+    interrupted = {
+        **job_record(tmp_path, historical_job_id, state="interrupted"),
+        "preparation_id": preparation_id,
+        "profile_name": PROFILE_NAME,
+        "resolved_backend": "tensorrt",
+        "resolved_model": locked_profile()["model_path"],
+        "resolved_scale": 2,
+        "profile_json": json.dumps(locked_profile(), sort_keys=True),
+    }
+    rve_store.insert(interrupted)
+
+    job = create_rve_job(
+        preparation_id,
+        rve_store,
+        work_root=work_root,
+        verify_runtime=False,
+        validator=lambda path, plan: {"outcome": "PASS"},
+    )
+    operator_store.associate_rve_job(preparation_id, job["job_id"])
+
+    assert job["job_id"] != historical_job_id
+    assert operator_store.get_workflow(current["workflow_id"])["rve_job_id"] == job["job_id"]
+    assert operator_store.get_workflow(historical["workflow_id"])["rve_job_id"] == historical_job_id
 
 
 def test_unexecuted_plan_is_ready_but_started_missing_output_is_failure(

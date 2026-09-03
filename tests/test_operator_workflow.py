@@ -227,6 +227,27 @@ def test_reselecting_unstarted_source_reuses_current_workflow(library_store):
     assert second["workflow_id"] == first["workflow_id"]
 
 
+def test_recovery_binds_validated_preparation_to_current_clean_workflow_only(library_store):
+    store, _, intake, _ = library_store
+    (intake / "Movie.mkv").write_bytes(b"movie")
+    source = store.list_locations(role="ORIGINAL_SOURCE")[0]
+    preparation_id = "a" * 32
+    historical_job_id = "b" * 32
+
+    historical = store.create_workflow(source["location_id"], "Movie.mkv")
+    historical = store.associate_preparation(historical["workflow_id"], preparation_id)
+    historical = store.associate_rve_job(preparation_id, historical_job_id)
+
+    current = store.create_workflow(source["location_id"], "Movie.mkv")
+    recovered = store.recover_preparation_to_workflow(current["workflow_id"], preparation_id)
+
+    assert recovered["workflow_id"] == current["workflow_id"]
+    assert recovered["preparation_id"] == preparation_id
+    assert recovered["rve_job_id"] is None
+    assert store.get_workflow(historical["workflow_id"])["rve_job_id"] == historical_job_id
+    assert store.get_workflow(historical["workflow_id"])["preparation_id"] == preparation_id
+
+
 def test_workflow_rejects_wrong_location_roles(library_store):
     store, _, _, _ = library_store
     destination = store.create_location(

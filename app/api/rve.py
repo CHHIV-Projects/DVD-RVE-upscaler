@@ -16,6 +16,7 @@ class CreateRVEJobRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     preparation_id: str
+    workflow_id: str | None = None
 
 
 def _service_error(exc: Exception) -> HTTPException:
@@ -35,12 +36,26 @@ def list_preparations():
 def create_job(payload: CreateRVEJobRequest, request: Request):
     try:
         operator_store = getattr(request.app.state, "operator_store", None)
-        if operator_store and hasattr(operator_store, "find_workflow_by_preparation"):
-            workflow = operator_store.find_workflow_by_preparation(payload.preparation_id)
-            if workflow and workflow["rve_job_id"]:
-                raise RuntimeError(
-                    "This workflow already has an RVE job; duplicate enhancement is not the default action."
-                )
+        if operator_store is not None:
+            if payload.workflow_id:
+                workflow = operator_store.get_workflow(payload.workflow_id)
+                if workflow["rve_job_id"] is not None:
+                    raise RuntimeError(
+                        "This workflow already has an RVE job; duplicate enhancement is not the default action."
+                    )
+                if workflow["preparation_id"] not in {None, payload.preparation_id}:
+                    raise RuntimeError("Workflow is already associated with a different preparation.")
+                if workflow["preparation_id"] is None:
+                    operator_store.recover_preparation_to_workflow(
+                        payload.workflow_id,
+                        payload.preparation_id,
+                    )
+            elif hasattr(operator_store, "find_workflow_by_preparation"):
+                workflow = operator_store.find_workflow_by_preparation(payload.preparation_id)
+                if workflow and workflow["rve_job_id"]:
+                    raise RuntimeError(
+                        "This workflow already has an RVE job; duplicate enhancement is not the default action."
+                    )
         job = create_rve_job(payload.preparation_id, request.app.state.rve_store)
         if hasattr(request.app.state, "operator_store"):
             request.app.state.operator_store.associate_rve_job(

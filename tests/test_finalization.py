@@ -627,13 +627,13 @@ def test_publication_root_uses_backing_cifs_row_after_autofs_activation(tmp_path
     publication.mkdir()
     movies = tmp_path / "movies"
     movies.mkdir()
-    accessed = []
+    opened = []
 
-    def access_guard(path, mode):
-        accessed.append((str(path), mode))
-        return True
+    def scandir_guard(path):
+        opened.append(str(path))
+        return iter(())
 
-    monkeypatch.setattr("app.services.finalization.os.access", access_guard)
+    monkeypatch.setattr("app.services.finalization.os.scandir", scandir_guard)
     values = {
         "TARGET": f"{publication}\n{publication}",
         "SOURCE": "systemd-1\n//nas/Movies/DVD Upscaled",
@@ -647,7 +647,7 @@ def test_publication_root_uses_backing_cifs_row_after_autofs_activation(tmp_path
     status = publication_root_status(root=publication, movies_root=movies, runner=runner)
     assert status["available"] is True
     assert status["filesystem"] == "cifs"
-    assert accessed
+    assert opened == [str(publication)]
     assert not publication_root_status(
         root=publication,
         movies_root=movies,
@@ -657,6 +657,37 @@ def test_publication_root_uses_backing_cifs_row_after_autofs_activation(tmp_path
             stderr="",
         ),
     )["available"]
+
+
+def test_publication_root_triggers_scandir_before_mount_evaluation(tmp_path, monkeypatch):
+    publication = tmp_path / "publication"
+    publication.mkdir()
+    movies = tmp_path / "movies"
+    movies.mkdir()
+    seen = []
+
+    def scandir_guard(path):
+        seen.append(str(path))
+        return iter(())
+
+    monkeypatch.setattr("app.services.finalization.os.scandir", scandir_guard)
+    monkeypatch.setattr(
+        "app.services.finalization.os.access",
+        lambda path, mode: True,
+    )
+    values = {
+        "TARGET": str(publication),
+        "SOURCE": "systemd-1",
+        "FSTYPE": "autofs",
+        "OPTIONS": "rw,nosuid",
+    }
+
+    def runner(command, **kwargs):
+        return SimpleNamespace(returncode=0, stdout=values[command[-1]], stderr="")
+
+    status = publication_root_status(root=publication, movies_root=movies, runner=runner)
+    assert status["available"] is False
+    assert seen == [str(publication)]
 
 
 def test_atomic_promotion_never_replaces_existing_file(tmp_path):

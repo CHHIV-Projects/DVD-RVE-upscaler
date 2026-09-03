@@ -424,7 +424,13 @@ def publication_root_status(
         return result
 
     try:
-        os.access(resolved, os.R_OK)
+        entries = os.scandir(resolved)
+        try:
+            next(entries, None)
+        finally:
+            close = getattr(entries, "close", None)
+            if callable(close):
+                close()
     except OSError:
         pass
 
